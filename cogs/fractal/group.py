@@ -138,28 +138,54 @@ class FractalGroup:
             guild = self.thread.guild
             voice_client = guild.voice_client
 
-            # Connect if not already connected
+            # Disconnect stale client first
+            if voice_client and not voice_client.is_connected():
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                voice_client = None
+
+            # Connect if not already connected (self_deaf=True since we only play audio)
             if not voice_client:
-                voice_client = await self.voice_channel.connect()
+                voice_client = await self.voice_channel.connect(
+                    timeout=30.0, reconnect=True, self_deaf=True
+                )
             elif voice_client.channel != self.voice_channel:
                 await voice_client.move_to(self.voice_channel)
+
+            # Wait for connection to be fully ready
+            await asyncio.sleep(1.0)
+
+            if not voice_client.is_connected():
+                self.logger.warning("Voice client not connected after wait")
+                return
 
             # Play the ping sound
             if voice_client.is_playing():
                 voice_client.stop()
 
+            source = discord.FFmpegPCMAudio(
+                PING_SOUND, executable='/opt/homebrew/bin/ffmpeg'
+            )
             voice_client.play(
-                discord.FFmpegPCMAudio(PING_SOUND),
+                source,
                 after=lambda e: asyncio.run_coroutine_threadsafe(
                     self._disconnect_after_ping(voice_client), self.cog.bot.loop
                 )
             )
         except Exception as e:
-            self.logger.error(f"Failed to play audio ping: {e}")
+            self.logger.error(f"Failed to play audio ping: {e}", exc_info=True)
+            try:
+                vc = guild.voice_client
+                if vc:
+                    await vc.disconnect(force=True)
+            except Exception:
+                pass
 
     async def _disconnect_after_ping(self, voice_client):
         """Disconnect from voice after the ping finishes"""
-        await asyncio.sleep(1)
+        await asyncio.sleep(3)
         try:
             if voice_client and voice_client.is_connected():
                 await voice_client.disconnect()

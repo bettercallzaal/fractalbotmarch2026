@@ -5,6 +5,9 @@ import os
 from discord.ext import commands
 from dotenv import load_dotenv
 
+# Load opus for voice support
+discord.opus.load_opus('/opt/homebrew/lib/libopus.dylib')
+
 # Load configuration
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -24,6 +27,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.guilds = True
+intents.voice_states = True
 
 # Initialize bot with command prefix
 bot = commands.Bot(command_prefix='!', intents=intents)

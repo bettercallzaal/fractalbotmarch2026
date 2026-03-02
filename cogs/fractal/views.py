@@ -2,6 +2,7 @@ import discord
 import logging
 from typing import Callable, Dict, List
 from .group import FractalGroup
+from config.config import FRACTAL_BOT_CHANNEL_ID
 
 class ZAOFractalVotingView(discord.ui.View):
     """UI view with voting buttons for fractal rounds"""
@@ -102,10 +103,13 @@ class FractalNameModal(discord.ui.Modal, title="Name Your Fractal"):
 
         await interaction.response.defer()
 
-        # Get the parent channel
-        channel = interaction.channel
-        if isinstance(channel, discord.Thread):
-            channel = channel.parent
+        # Always create thread in the fractal-bot channel
+        channel = interaction.guild.get_channel(FRACTAL_BOT_CHANNEL_ID)
+        if not channel:
+            # Fallback to current channel if fractal-bot channel not found
+            channel = interaction.channel
+            if isinstance(channel, discord.Thread):
+                channel = channel.parent
 
         # Create public thread
         thread = await channel.create_thread(
