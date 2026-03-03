@@ -1,5 +1,67 @@
 {
-  "next_id": 1,
-  "proposals": {},
-  "_index_message_id": null
+  "next_id": 4,
+  "proposals": {
+    "1": {
+      "id": "1",
+      "title": "Curate: https://artizen.fund/index/p/heritage-collection?season=6",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** https://artizen.fund/index/p/heritage-collection?season=6\n**Link:** [View Project](https://artizen.fund/index/p/heritage-collection?season=6)\n\nThe Heritage show is led by a multidisciplinary creative and it prioritizes collaboration across fashion, music and education industries.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475146727597281491",
+      "message_id": "1475146729669001329",
+      "status": "closed",
+      "votes": {},
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=768,h=768,f=auto,dpr=2,fit=cover,q=25/f1768341020991x536867923851720900/bubble9apq802ktb5.jpeg",
+      "project_url": "https://artizen.fund/index/p/heritage-collection?season=6",
+      "created_at": "2026-02-22T15:06:27.322234",
+      "closed_at": "2026-03-02T22:41:54.257926"
+    },
+    "2": {
+      "id": "2",
+      "title": "Curate: https://artizen.fund/index/p/heritage-collection?season=6",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** https://artizen.fund/index/p/heritage-collection?season=6\n**Link:** [View Project](https://artizen.fund/index/p/heritage-collection?season=6)\n\nThe Heritage show is led by a multidisciplinary creative and it prioritizes collaboration across fashion, music and education industries.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475149017594724453",
+      "message_id": "1475149019033632788",
+      "status": "closed",
+      "votes": {
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3364.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1768341016921x543420915766010800/image.png",
+      "project_url": "https://artizen.fund/index/p/heritage-collection?season=6",
+      "created_at": "2026-02-22T15:15:33.165372",
+      "closed_at": "2026-03-02T22:41:54.258626"
+    },
+    "3": {
+      "id": "3",
+      "title": "Curate: https://artizen.fund/index/p/ecoes-of-freedom",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** https://artizen.fund/index/p/ecoes-of-freedom\n**Link:** [View Project](https://artizen.fund/index/p/ecoes-of-freedom)\n\nMy project is an augmented reality Web3 experience designed to expand cultural art & history through immersive storytelling bringing together art, emerging technology,& community in Jersey City.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475149512782909440",
+      "message_id": "1475149513995063439",
+      "status": "closed",
+      "votes": {
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3364.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1770084662377x601260017056570100/image.png",
+      "project_url": "https://artizen.fund/index/p/ecoes-of-freedom",
+      "created_at": "2026-02-22T15:17:31.136082",
+      "closed_at": "2026-03-02T22:41:54.258829"
+    }
+  },
+  "_index_message_id": "1475149023467012329"
 }

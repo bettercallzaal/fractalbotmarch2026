@@ -70,10 +70,13 @@ class FractalCog(BaseCog):
 
         # Check wallet status for each member
         registry = getattr(self.bot, 'wallet_registry', None)
+        self.logger.info(f"Wallet registry available: {registry is not None}")
         with_wallet = []
         without_wallet = []
         for member in members:
-            if registry and registry.lookup(member):
+            wallet = registry.lookup(member) if registry else None
+            self.logger.info(f"Wallet lookup for {member.display_name} (id={member.id}, name={member.name}, global={member.global_name}): {wallet}")
+            if wallet:
                 with_wallet.append(member)
             else:
                 without_wallet.append(member)
