@@ -27,83 +27,120 @@
     },
     {
       "id": 2,
-      "group_name": "Fractal 89 - Group 3",
-      "facilitator_id": "691422751491227719",
-      "facilitator_name": "OhnahjiB",
-      "fractal_number": "89",
-      "group_number": "3",
+      "group_name": "Fractal 88 - Group 1",
+      "facilitator_id": "214921134477541377",
+      "facilitator_name": "Zaal",
+      "fractal_number": "88",
+      "group_number": "1",
       "guild_id": "1127115902010277989",
-      "thread_id": "1478175914226483283",
+      "thread_id": "1475637490491719900",
       "rankings": [
         {
-          "user_id": "369284552763375617",
-          "display_name": "Joseph Goats",
+          "user_id": "1071292017117761616",
+          "display_name": "Motomoto",
           "level": 6,
           "respect": 110
+        },
+        {
+          "user_id": "736646205005758505",
+          "display_name": "SteveStrange",
+          "level": 5,
+          "respect": 68
+        },
+        {
+          "user_id": "214921134477541377",
+          "display_name": "Zaal",
+          "level": 4,
+          "respect": 42
         },
         {
           "user_id": "818336674245246996",
           "display_name": "Candy",
-          "level": 5,
-          "respect": 68
-        },
-        {
-          "user_id": "741279938409398272",
-          "display_name": "LUI",
-          "level": 4,
-          "respect": 42
-        },
-        {
-          "user_id": "691422751491227719",
-          "display_name": "OhnahjiB",
           "level": 3,
           "respect": 26
-        },
-        {
-          "user_id": "858425162297638942",
-          "display_name": "hurric4n3ike",
-          "level": 2,
-          "respect": 16
         }
       ],
-      "completed_at": "2026-03-02T23:44:35.684609"
+      "completed_at": "2026-02-23T23:37:26.937883"
     },
     {
       "id": 3,
-      "group_name": "Fractal Group 2 89 - Group 2",
-      "facilitator_id": "511383895900553246",
-      "facilitator_name": "EZinCrypto",
-      "fractal_number": "Group 2 89",
+      "group_name": "Fractal 88 - Group 2",
+      "facilitator_id": "691422751491227719",
+      "facilitator_name": "OhnahjiB",
+      "fractal_number": "88",
       "group_number": "2",
       "guild_id": "1127115902010277989",
-      "thread_id": "1478177223528939782",
+      "thread_id": "1475638395056422923",
       "rankings": [
         {
-          "user_id": "1327299786965127199",
-          "display_name": "Stilo",
+          "user_id": "360510207517786133",
+          "display_name": "emily",
           "level": 6,
           "respect": 110
         },
         {
-          "user_id": "1405549622289764407",
-          "display_name": "IMan Afrikah",
+          "user_id": "691422751491227719",
+          "display_name": "OhnahjiB",
           "level": 5,
           "respect": 68
         },
         {
-          "user_id": "297442139661402112",
-          "display_name": "trislit",
+          "user_id": "694266998426959933",
+          "display_name": "civil",
           "level": 4,
           "respect": 42
         },
         {
-          "user_id": "511383895900553246",
-          "display_name": "EZinCrypto",
+          "user_id": "428034491831812097",
+          "display_name": "Shawn | R3PLIC4NT |",
           "level": 3,
           "respect": 26
         }
       ],
-      "completed_at": "2026-03-03T00:04:07.499729"
+      "completed_at": "2026-02-23T23:41:36.421168"
+    },
+    {
+      "id": 4,
+      "group_name": "Fractal Feb 23rd - Group 3",
+      "facilitator_id": "511383895900553246",
+      "facilitator_name": "EZinCrypto",
+      "fractal_number": "Feb 23rd",
+      "group_number": "3",
+      "guild_id": "1127115902010277989",
+      "thread_id": "1475639995330068610",
+      "rankings": [
+        {
+          "user_id": "704093436952969246",
+          "display_name": "SwarthyHatter",
+          "level": 6,
+          "respect": 110
+        },
+        {
+          "user_id": "858425162297638942",
+          "display_name": "hurric4n3ike",
+          "level": 5,
+          "respect": 68
+        },
+        {
+          "user_id": "511383895900553246",
+          "display_name": "EZinCrypto",
+          "level": 4,
+          "respect": 42
+        },
+        {
+          "user_id": "760585557834465311",
+          "display_name": "Rhia23k",
+          "level": 3,
+          "respect": 26
+        },
+        {
+          "user_id": "369284552763375617",
+          "display_name": "Joseph Goats",
+          "level": 2,
+          "respect": 16
+        }
+      ],
+      "completed_at": "2026-02-23T23:48:04.840507"
     }
   ]
 }

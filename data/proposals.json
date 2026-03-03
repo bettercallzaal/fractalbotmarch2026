@@ -1,67 +1,440 @@
 {
-  "next_id": 4,
+  "next_id": 19,
   "proposals": {
     "1": {
       "id": "1",
-      "title": "Curate: https://artizen.fund/index/p/heritage-collection?season=6",
-      "description": "**Should the ZAO fund this project?**\n\n**Project:** https://artizen.fund/index/p/heritage-collection?season=6\n**Link:** [View Project](https://artizen.fund/index/p/heritage-collection?season=6)\n\nThe Heritage show is led by a multidisciplinary creative and it prioritizes collaboration across fashion, music and education industries.\n\nVote **Yes** to include or **No** to pass.",
+      "title": "Curate: American Season",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** American Season\n**Link:** [View Project](https://artizen.fund/index/p/american-season?season=6)\n\nAmerican Season integrates AI agents as collaborative tools that help organize interviews, surface themes, and support ethical decision-making while keeping authorship human-led. The project operates within a creator-owned, fair-compensation model, using decentralized coordination to build with parents and communities transparently. It culminates in public gatherings and immersive activations rooted in grassroots cultural production.\n\nVote **Yes** to include or **No** to pass.",
       "type": "curate",
       "author_id": "214921134477541377",
-      "thread_id": "1475146727597281491",
-      "message_id": "1475146729669001329",
-      "status": "closed",
-      "votes": {},
+      "thread_id": "1475628987148537887",
+      "message_id": "1475628996925587567",
+      "status": "active",
+      "votes": {
+        "214921134477541377": {
+          "value": "no",
+          "weight": 3374.0
+        },
+        "1211821614753390622": {
+          "value": "no",
+          "weight": 1609.0
+        }
+      },
       "options": [],
       "funding_amount": null,
-      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=768,h=768,f=auto,dpr=2,fit=cover,q=25/f1768341020991x536867923851720900/bubble9apq802ktb5.jpeg",
-      "project_url": "https://artizen.fund/index/p/heritage-collection?season=6",
-      "created_at": "2026-02-22T15:06:27.322234",
-      "closed_at": "2026-03-02T22:41:54.257926"
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1768688732127x749684598741795500/image.png",
+      "project_url": "https://artizen.fund/index/p/american-season?season=6",
+      "created_at": "2026-02-23T23:02:49.008191"
     },
     "2": {
       "id": "2",
-      "title": "Curate: https://artizen.fund/index/p/heritage-collection?season=6",
-      "description": "**Should the ZAO fund this project?**\n\n**Project:** https://artizen.fund/index/p/heritage-collection?season=6\n**Link:** [View Project](https://artizen.fund/index/p/heritage-collection?season=6)\n\nThe Heritage show is led by a multidisciplinary creative and it prioritizes collaboration across fashion, music and education industries.\n\nVote **Yes** to include or **No** to pass.",
-      "type": "curate",
+      "title": "https://artizen.fund/index/p/gaias-sound-temple",
+      "description": "The Gaia Sound Temple is a creator-owned, independently operated planetary listening network \u2014 distributing live sound streams from volcanic regions, ice caves, forests, and oceans into galleries, classrooms, and a public web interface worldwide. AI drives site architecture, adaptive educational tools, and environmental pattern recognition, woven into the backbone of the project as living infrastructure. The streaming network itself is a new kind of technological nervous system for the planet. Each installation location is governed by ethical agreements with local ecological stewards. Non-extraction is built into the governance from the ground up \u2014 every partnership with an ecosystem or community is rooted in relationship, not transaction. Community participation runs through every layer. The biological station network connects research stations across ecosystems. Schools tune into live biospheric audio as a planetary classroom. Artists recompose Earth sounds live in public performances and listening rituals, making the planet itself a co-performer. Live streams, an interactive global map, and open educational interfaces keep the infrastructure visible and accessible in real time. The project unfolds in public, continuously. Gallery installations project the live sky color of transmitting locations while biospheric audio fills the room \u2014 bringing the atmosphere of a Patagonian dusk or an Arctic coastline into physical space, felt and shared by anyone who walks in. The Gaia Sound Temple is collaborative cultural production at planetary scale, using technology to deepen our listening, expand ecological awareness, and invite collective care.",
+      "type": "text",
       "author_id": "214921134477541377",
-      "thread_id": "1475149017594724453",
-      "message_id": "1475149019033632788",
-      "status": "closed",
+      "thread_id": "1475797963317051394",
+      "message_id": "1475797965510541412",
+      "status": "active",
       "votes": {
         "214921134477541377": {
           "value": "yes",
-          "weight": 3364.0
+          "weight": 3374.0
+        },
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
         }
       },
       "options": [],
       "funding_amount": null,
-      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1768341016921x543420915766010800/image.png",
-      "project_url": "https://artizen.fund/index/p/heritage-collection?season=6",
-      "created_at": "2026-02-22T15:15:33.165372",
-      "closed_at": "2026-03-02T22:41:54.258626"
+      "image_url": null,
+      "project_url": null,
+      "created_at": "2026-02-24T10:14:14.218935"
     },
     "3": {
       "id": "3",
-      "title": "Curate: https://artizen.fund/index/p/ecoes-of-freedom",
-      "description": "**Should the ZAO fund this project?**\n\n**Project:** https://artizen.fund/index/p/ecoes-of-freedom\n**Link:** [View Project](https://artizen.fund/index/p/ecoes-of-freedom)\n\nMy project is an augmented reality Web3 experience designed to expand cultural art & history through immersive storytelling bringing together art, emerging technology,& community in Jersey City.\n\nVote **Yes** to include or **No** to pass.",
-      "type": "curate",
+      "title": "https://artizen.fund/index/p/international-artists-project?season=6",
+      "description": "International Artists Project is creating International Artists Festival with music artists born in every country of the world, as a follow-up to The World Album, which was the first album to feature music artists from every country.",
+      "type": "text",
       "author_id": "214921134477541377",
-      "thread_id": "1475149512782909440",
-      "message_id": "1475149513995063439",
-      "status": "closed",
+      "thread_id": "1475798063040827455",
+      "message_id": "1475798065293168785",
+      "status": "active",
       "votes": {
         "214921134477541377": {
           "value": "yes",
-          "weight": 3364.0
+          "weight": 3374.0
+        },
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
         }
       },
       "options": [],
       "funding_amount": null,
-      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1770084662377x601260017056570100/image.png",
+      "image_url": null,
+      "project_url": null,
+      "created_at": "2026-02-24T10:14:37.984650"
+    },
+    "4": {
+      "id": "4",
+      "title": "https://artizen.fund/index/p/insync",
+      "description": "n/a",
+      "type": "text",
+      "author_id": "214921134477541377",
+      "thread_id": "1475798223510569043",
+      "message_id": "1475798225557655697",
+      "status": "active",
+      "votes": {
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3374.0
+        },
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": null,
+      "created_at": "2026-02-24T10:15:16.206989"
+    },
+    "5": {
+      "id": "5",
+      "title": "Curate: FEMSTAGE",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** FEMSTAGE\n**Link:** [View Project](https://artizen.fund/index/p/femstage?season=6)\n\nHi,my name is Zule Rojas and i am the founder of FEMSTAGE, a project dedicated to showcasing and connecting high-level professional women in the audiovisual industry. Femstage was created to provide support and opportunities for creative and technical female talent, in a sector where representation is still limited. Our platform brings together active, experienced professionals, offering:   - Connection between experts for collaborative projets. - Access to advanced training, specialized workshps, and legal and financial advisory - Support for technical and creative projets, promoting initiatives led by women with cultural and professional impact.  we believe FEMSTAGE reflects professionalism, stability, and innovation, bringing together established experts on a digital platform that enhances female creativity and diversity in audiovisual, with a sustainable model that ensures medium- an long term growth. We would love for you to be part of this unique community projetc, where audiovisual technology merges with ART, professional collaboration and support.   With the fund's support, we will be able to: -Develop the complete platform (web & app)  - Launch recruitment and training programs for active professionals - Create high-value cultural content that connects and strengthens the creative community - Consolidate a network of legal, financial and support for our user's projets.   We are excited to present FEMSTAGE and explore how this fund can help us build a stable, high-level professional female community in audiovisual industry, with tangible and measurable impact.   thank you  Zule Rojas  Founder of Femstage\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475798498413908029",
+      "message_id": "1475798500078780547",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "no",
+          "weight": 1609.0
+        },
+        "214921134477541377": {
+          "value": "no",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771546210672x362600562215049700/image.png",
+      "project_url": "https://artizen.fund/index/p/femstage?season=6",
+      "created_at": "2026-02-24T10:16:21.530885"
+    },
+    "6": {
+      "id": "6",
+      "title": "Curate: Labour Union of Higherdimensional Shapeshifters",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Labour Union of Higherdimensional Shapeshifters\n**Link:** [View Project](https://artizen.fund/index/p/labour-union-of-higher-dimensional-shapeshifters)\n\nAs the Labour Union of Higherdimensional Shapeshifters we enable opportunity to be accepted.  We create participatory reality that is aligned with the spirit of the funds that accept us.  Main feature: transmedia experience interactive movie.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799112703021158",
+      "message_id": "1475799113852387381",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "no",
+          "weight": 1609.0
+        },
+        "214921134477541377": {
+          "value": "no",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1768823933781x346741307713669400/image.png",
+      "project_url": "https://artizen.fund/index/p/labour-union-of-higher-dimensional-shapeshifters",
+      "created_at": "2026-02-24T10:18:47.959227"
+    },
+    "7": {
+      "id": "7",
+      "title": "Curate: Akiya Collective",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Akiya Collective\n**Link:** [View Project](https://artizen.fund/index/p/akiya-collective)\n\nour project focuses on revitalizing abandoned houses (akiyas) in rural japan into art installations, community residencies + living rooms / social commons, and sites of collective inquiry + research. we also operate a social r&d lab focused on how to maintain and improve on public goods and social technologies in the 21st century.  we publish all of our findings in an open-source playbook that anyone can use to: acquire akiyas, run residencies and common spaces, and experiment / contribute to social technologies. our community currently consists of ~1,000 global members, many of whom have leveraged (and contributed to) our playbook in acquiring and renovating akiyas, as well as connecting to other members doing similar efforts.   in the next two years, we are also launching a nation-wide participatory art / research experience, in collaboration with a japanese university (chiba tech), and are creating a docu-series, funded by the us-japan foundation, to scale learnings about how to steward public goods + improve coordination in local societies. previously, we have created participatory / public installations around the world, including one at a historical landmark (harvard square).\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799207330975817",
+      "message_id": "1475799209021276181",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "no",
+          "weight": 1609.0
+        },
+        "214921134477541377": {
+          "value": "no",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771529481300x388031783883498560/image.png",
+      "project_url": "https://artizen.fund/index/p/akiya-collective",
+      "created_at": "2026-02-24T10:19:10.560544"
+    },
+    "8": {
+      "id": "8",
+      "title": "Curate: DreamStarter.xyz",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** DreamStarter.xyz\n**Link:** [View Project](https://artizen.fund/index/p/dreamstarterxyz?season=6)\n\nDreamStarter is focused on empowering creators and musicians with blockchain and AI tools - DreamStarter for 100% autonomous social media agents, and MediaPilot.app for human in the loop multiplatform social media strategies.  We've helped 200+ dreamers launch their dreams, cumulatively generating 20K USD in revenue and actively pursuing their dreams - from English Education and Spiritual Awareness to Music Prediction Markets.  DreamStarter will enable musicians and creators to spend more time doing the things they love, and leave the marketing to smart AI Agents.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799331922772062",
+      "message_id": "1475799341162565707",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "no",
+          "weight": 1609.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771263434107x675532989217316700/image.png",
+      "project_url": "https://artizen.fund/index/p/dreamstarterxyz?season=6",
+      "created_at": "2026-02-24T10:19:42.127663"
+    },
+    "9": {
+      "id": "9",
+      "title": "Curate: \"Profundo\" - Cuerpo, Agua y Territorio",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** &quot;Profundo&quot; - Cuerpo, Agua y Territorio\n**Link:** [View Project](https://artizen.fund/index/p/profundo---cuerpo-agua-y-territorio)\n\nWe are a collective of Mexican women creating community-based processes and network to restore the relationship between local community and the ecosystem in the Yucat\u00e1n Peninsula. We do this through land-based and underwater facilitation processes with local youth \u2014 especially Maya communities \u2014 as well as activists, biologists, artists, somatic practitioners, and freedivers creating a multicultural web of local people and organizations.  Our work integrates two complementary models:  -Somatic Apnea / Freediving A methodology developed by Fernanda Coatl, rooted in the practice of \u201cOcean Dance,\u201d and adapted into community processes within their cenotes. This model uses embodied and underwater experiences to foster deep relational connection with water ecosystems.  -Agile Model for Community Self-Governance A participatory organizational framework that unfolds through dynamics designed to make collective intelligence visible and to decentralize power, strengthening community self-governance and shared decision-making.  We are implementing this process throughout March to June (for now). The funds we will unlock from Artizen in June will primarily support the local initiatives that emerge and become woven into the network during our gathering of organizations and community members. The money is for the ecosystem, not for any personal expences, if you see our website we have a transparency document where we make very explicit where is the money going towards. We just work through Ecology/Economy of Generosity.  We also have a website that we would like to further develop. We plan redesign and improve it so we can create an open documentation platform showcasing the years of socio-environmental processes we have facilitated, share results, and provide online tools for communities interested in applying Somatic Apnea and the Agile Model in their own territories.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799533790298173",
+      "message_id": "1475799535178743831",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "no",
+          "weight": 1609.0
+        },
+        "214921134477541377": {
+          "value": "no",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1770306875476x766538459842019700/Profundo%20Artizen.JPG",
+      "project_url": "https://artizen.fund/index/p/profundo---cuerpo-agua-y-territorio",
+      "created_at": "2026-02-24T10:20:28.392768"
+    },
+    "10": {
+      "id": "10",
+      "title": "Curate: Participatory Spatial Music Show",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Participatory Spatial Music Show\n**Link:** [View Project](https://artizen.fund/index/p/the-participatory-spatial-music-lab)\n\nParticipatory Spatial Music Show is a creator-owned cultural platform where audiences don\u2019t attend a performance\u2014they become the choir that creates it.  Participants sing. Harmonize. Contribute lyrical phrases. Offer voice recordings in advance. During the show, their voices are captured, looped, spatialized, and composed into immersive sound environments. The room responds through spatial audio and reactive visuals, dissolving the boundary between artist and audience. Culture is not delivered\u2014it is co-authored in real time.  Emerging technology functions as coordination infrastructure. AI-assisted tools help transform audience submissions into performance-ready songs. Live crowd capture and immersive sound systems weave individual voices into coherent collective expression.   The initial activations will be unticketed public labs in San Pedro, California, hosted at The Majestic\u2014a community-conscious, place-based collaborator committed to local cultural vitality. These labs prioritize access, experimentation, and fair compensation for artists and technologists while inviting the public directly into the creative process.  This is collaborative cultural production, not isolated output. Each gathering becomes a living system where strangers experience themselves as part of a shared instrument. The music, structure, and emotional arc are informed by the collective presence in the room.  The culmination is always real-world activation: immersive, participatory performances that merge digital coordination with embodied singing and communal authorship.  Participatory Spatial Music Show prototypes culture shaped by the many\u2014where technology amplifies human resonance, not replaces it.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799694922743899",
+      "message_id": "1475799696877551678",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        },
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1769744665118x355255540685235600/image.png",
+      "project_url": "https://artizen.fund/index/p/the-participatory-spatial-music-lab",
+      "created_at": "2026-02-24T10:21:06.895790"
+    },
+    "11": {
+      "id": "11",
+      "title": "Curate: ENTERTAINMENT EVOLVED",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** ENTERTAINMENT EVOLVED\n**Link:** [View Project](https://artizen.fund/index/p/entertainment-evolved)\n\nThis film will utilize cutting edge AI technology and create real world activations through public screenings.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799777647001632",
+      "message_id": "1475799781191319674",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        },
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771383929073x469494449857075900/image.png",
+      "project_url": "https://artizen.fund/index/p/entertainment-evolved",
+      "created_at": "2026-02-24T10:21:27.018462"
+    },
+    "12": {
+      "id": "12",
+      "title": "Curate: Cinemetropolis",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Cinemetropolis\n**Link:** [View Project](https://artizen.fund/index/p/cinemetropolis)\n\nCinemetropolis is a project that blends XR, augmented reality, and AI to create a singular experience that takes participants through the creation of their favorite films. Both a group experience and a personal experience, Cinemetropolis's tech can be used in a myriad of educational forms in the future.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799845087477922",
+      "message_id": "1475799847125909584",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        },
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1770948176730x408394026390636740/image.png",
+      "project_url": "https://artizen.fund/index/p/cinemetropolis",
+      "created_at": "2026-02-24T10:21:42.761791"
+    },
+    "13": {
+      "id": "13",
+      "title": "Curate: Akuya",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Akuya\n**Link:** [View Project](https://artizen.fund/index/p/akuya?season=6)\n\nThrough my music, I aim to inspire and unite people worldwide, promoting cross-cultural understanding and empathy. My unique sound blends African rhythms with global influences, showcasing Nigerian culture and talent to a broader audience. By supporting this project, you'll contribute to:  - Amplifying a fresh voice in the music industry - Promoting diversity and cultural exchange - Bringing people together through the power of music - Empowering aspiring artists from Nigeria and beyond\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1475799933771710546",
+      "message_id": "1475799935508283525",
+      "status": "active",
+      "votes": {
+        "214921134477541377": {
+          "value": "no",
+          "weight": 3374.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771076629168x683549920698143300/image.png",
+      "project_url": "https://artizen.fund/index/p/akuya?season=6",
+      "created_at": "2026-02-24T10:22:03.771298"
+    },
+    "14": {
+      "id": "14",
+      "title": "Curate: The Impact Concerts",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** The Impact Concerts\n**Link:** [View Project](https://artizen.fund/index/p/impact-concerts)\n\nBringing awareness to social goods projects  with cultural exchange through live music between project speakers!\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1476164929735233608",
+      "message_id": "1476164931702226944",
+      "status": "active",
+      "votes": {
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3374.0
+        },
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1740620603745x933623247418640200/image.png",
+      "project_url": "https://artizen.fund/index/p/impact-concerts",
+      "created_at": "2026-02-25T10:32:25.630691"
+    },
+    "15": {
+      "id": "15",
+      "title": "Curate: Heritage Collection",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Heritage Collection\n**Link:** [View Project](https://artizen.fund/index/p/heritage-collection?season=6)\n\nThe Heritage show is led by a multidisciplinary creative and it prioritizes collaboration across fashion, music and education industries.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1476266541711495272",
+      "message_id": "1476266543620034581",
+      "status": "active",
+      "votes": {
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3374.0
+        },
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/heritage-collection?season=6",
+      "created_at": "2026-02-25T17:16:11.821937"
+    },
+    "16": {
+      "id": "16",
+      "title": "Curate: Ecoes Of Freedom",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Ecoes Of Freedom\n**Link:** [View Project](https://artizen.fund/index/p/ecoes-of-freedom)\n\nMy project is an augmented reality Web3 experience designed to expand cultural art & history through immersive storytelling bringing together art, emerging technology,& community in Jersey City. https://trishgia.art/america-250-augmented-reality-art-and-history-tour/\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1476266965181006020",
+      "message_id": "1476266967793926226",
+      "status": "active",
+      "votes": {
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3374.0
+        },
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
       "project_url": "https://artizen.fund/index/p/ecoes-of-freedom",
-      "created_at": "2026-02-22T15:17:31.136082",
-      "closed_at": "2026-03-02T22:41:54.258829"
+      "created_at": "2026-02-25T17:17:52.968771"
+    },
+    "17": {
+      "id": "17",
+      "title": "Curate: The New Vanguard",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** The New Vanguard\n**Link:** [View Project](https://artizen.fund/index/p/the-new-vanguard?season=6)\n\nThe New Vanguard aligns with the ZAO Fund by transforming contemporary Nigerian portraiture into a decentralized public good. Instead of high-level theory, I am building a physical-to-digital bridge: a high-impact exhibition in Abuja backed by a permanent, onchain archive. This project uses blockchain not as a gimmick, but as the literal infrastructure for cultural preservation, ensuring that the raw emotion and fashion of our generation are documented in a non-extractive, community-owned vault that lasts forever. As an insider with five years of deep roots in the Abuja Photo Festival and subcultures like Capitol Film Fest, I have the cultural capital to turn this project into a collective experience. The New Vanguard isn't just my solo output; it is a collaborative \"real-world activation\" designed to onboard Nigerian creatives into emerging tech. By documenting our identity in public and sharing the process of onchain archiving, I am providing the community with a blueprint for fair compensation and shared ownership of our own cultural narrative.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1476731643195691008",
+      "message_id": "1476731645565341716",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/the-new-vanguard?season=6",
+      "created_at": "2026-02-27T00:04:20.751588"
+    },
+    "18": {
+      "id": "18",
+      "title": "Curate: The Art Factory",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** The Art Factory\n**Link:** [View Project](https://artizen.fund/index/p/the-art-factory)\n\nThe Art Factory is a creator-owned theatre collective I founded as a theatre creative and music artiste from Abuja and a graduate of the University of Ilorin, Department of Performing and Film Arts. It is independently operated by me and a team of actors, singers, dancers, and stage crew who intend to create monthly stage productions that pays everyone fairly and open real opportunities for young creatives and audiences. Our project integrates emerging technology meaningfully by using blockchain tools through platforms like Artizen Fund to document productions, share behind-the-scenes process publicly, mint performance artifacts, and allow supporters to participate transparently in sustaining african theatre storytelling. We also explore AI tools for directions, rehearsal planning, and accessible creative workflows that support artists rather than replace them. Community participation is central to The Art Factory. Each production involves open auditions, storytelling workshops, youth mentorship, and community meetings where audiences shape future themes. We collaborate with local creatives in Abuja and surrounding communities, building a shared cultural process instead of isolated output. We build in public by documenting rehearsals, budgets, challenges, and outcomes through social media, onchain records, and community screenings. Our model is non-extractive: artists are paid stipends, revenue is shared transparently, and skills training helps creatives grow sustainable careers. The project culminates in real-world public performances; one play or musical per month alongside workshops and community showcases that create accessible theatre experiences for young people and underserved audiences. The Art Factory is not about personal funding; it is about building a fair, collaborative cultural home where African theatre stories live, grow, and belong to everyone.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1476732011929665649",
+      "message_id": "1476732012663406626",
+      "status": "active",
+      "votes": {
+        "1211821614753390622": {
+          "value": "yes",
+          "weight": 1609.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/the-art-factory",
+      "created_at": "2026-02-27T00:05:48.368460"
     }
   },
-  "_index_message_id": "1475149023467012329"
+  "_index_message_id": "1475629008933880055"
 }
