@@ -1212,32 +1212,40 @@ class ProposalsCog(BaseCog):
         for p in self.store._data['proposals'].values():
             known_thread_ids.add(str(p['thread_id']))
 
-        # Scan all threads (active + archived) in the proposals channel
         recovered = []
         skipped = []
         errors = []
 
-        # Active threads
+        # Only scan active (non-archived) threads — fast, no extra API calls
         all_threads = channel.threads.copy()
 
-        # Also fetch archived threads
+        # Also try to fetch recently archived threads (limit to 20 to stay fast)
         try:
-            async for thread in channel.archived_threads(limit=100):
+            async for thread in channel.archived_threads(limit=20):
                 all_threads.append(thread)
         except Exception as e:
             self.logger.error(f"Error fetching archived threads: {e}")
 
+        # Filter to only untracked proposal threads first
+        untracked = []
         for thread in all_threads:
-            if str(thread.id) in known_thread_ids:
-                continue  # Already in the store
+            if str(thread.id) not in known_thread_ids and thread.name.startswith("Proposal:"):
+                untracked.append(thread)
 
-            if not thread.name.startswith("Proposal:"):
-                continue  # Not a proposal thread
+        if not untracked:
+            await interaction.followup.send(
+                f"**Proposal Recovery Report**\n\n"
+                f"Scanned {len(all_threads)} threads — all proposals are already tracked.\n"
+                f"Currently tracking {len(known_thread_ids)} proposals.",
+                ephemeral=True
+            )
+            return
 
+        for thread in untracked:
             try:
-                # Find the bot's first message with an embed (the proposal message)
+                # Find the bot's first message with an embed
                 bot_message = None
-                async for msg in thread.history(limit=5, oldest_first=True):
+                async for msg in thread.history(limit=3, oldest_first=True):
                     if msg.author.id == self.bot.user.id and msg.embeds:
                         bot_message = msg
                         break
@@ -1250,37 +1258,36 @@ class ProposalsCog(BaseCog):
 
                 # Parse proposal data from the embed
                 title = embed.title or thread.name.replace("Proposal: ", "")
-                # Remove type emoji prefix if present
-                for emoji in TYPE_EMOJIS.values():
-                    if title.startswith(emoji):
-                        title = title[len(emoji):].strip()
+                for e_char in TYPE_EMOJIS.values():
+                    if title.startswith(e_char):
+                        title = title[len(e_char):].strip()
                         break
 
                 description = embed.description or ""
                 project_url = embed.url
                 image_url = embed.thumbnail.url if embed.thumbnail else None
 
-                # Determine type from title/description
+                # Determine type
                 proposal_type = 'text'
                 if title.startswith("Curate:") or "Should the ZAO fund this project?" in description:
                     proposal_type = 'curate'
                 elif "Funding Amount" in description:
                     proposal_type = 'funding'
 
-                # Try to extract author from description ("Proposed by @user")
-                author_id = str(self.bot.user.id)  # fallback to bot
+                # Extract author
+                author_id = str(self.bot.user.id)
                 author_match = re.search(r'Proposed by <@(\d+)>', description)
                 if author_match:
                     author_id = author_match.group(1)
 
-                # Use the message creation time as created_at
-                created_at = bot_message.created_at.isoformat()
+                # Use message creation time
+                created_at = bot_message.created_at.replace(tzinfo=None).isoformat()
 
-                # Check if the 7-day window has passed
+                # Check 7-day window
                 age = datetime.utcnow() - bot_message.created_at.replace(tzinfo=None)
                 status = 'closed' if age >= timedelta(days=7) else 'active'
 
-                # Create the proposal in the store
+                # Create in store
                 pid = str(self.store._data['next_id'])
                 self.store._data['next_id'] += 1
 
@@ -1302,24 +1309,18 @@ class ProposalsCog(BaseCog):
                 }
 
                 self.store._data['proposals'][pid] = proposal
-                recovered.append(f"#{pid} — {title} ({status})")
+                recovered.append(f"#{pid} — {title[:50]} ({status})")
 
-                # Register voting view if active
+                # Register voting view if active (no embed edit — keep it fast)
                 if status == 'active':
                     view = ProposalVoteView(self.store, pid, bot=self.bot)
                     self.bot.add_view(view, message_id=bot_message.id)
-                    # Update the embed with proper formatting
-                    try:
-                        new_embed = _build_proposal_embed(proposal, self.store)
-                        await bot_message.edit(embed=new_embed, view=view)
-                    except Exception as e:
-                        self.logger.error(f"Error updating recovered proposal embed: {e}")
 
             except Exception as e:
-                errors.append(f"{thread.name}: {str(e)[:80]}")
+                errors.append(f"{thread.name[:40]}: {str(e)[:60]}")
                 self.logger.error(f"Error recovering thread {thread.name}: {e}", exc_info=True)
 
-        # Save all recovered proposals
+        # Save all at once
         if recovered:
             self.store._save()
             await self._update_proposals_index()
@@ -1333,8 +1334,6 @@ class ProposalsCog(BaseCog):
             report += f"**Recovered ({len(recovered)}):**\n"
             for r in recovered:
                 report += f"+ {r}\n"
-        else:
-            report += "No missing proposals found.\n"
 
         if skipped:
             report += f"\n**Skipped ({len(skipped)}):** (no bot embed found)\n"
@@ -1345,6 +1344,9 @@ class ProposalsCog(BaseCog):
             report += f"\n**Errors ({len(errors)}):**\n"
             for e in errors:
                 report += f"! {e}\n"
+
+        if recovered:
+            report += f"\nUse `/proposals` to see updated list. Use `/admin_reopen_proposal` to reactivate any closed ones."
 
         await interaction.followup.send(report, ephemeral=True)
 
