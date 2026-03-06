@@ -349,7 +349,7 @@ def _build_proposal_embed(proposal: dict, store: ProposalStore, author_mention: 
     embed.add_field(name="\u200b", value=tally, inline=False)
 
     # Date info
-    created = datetime.fromisoformat(proposal['created_at'])
+    created = datetime.fromisoformat(proposal['created_at']).replace(tzinfo=None)
     expires = created + timedelta(days=7)
     time_left = _time_remaining_text(proposal)
     status_label = proposal.get('status', 'active').capitalize()
@@ -385,7 +385,7 @@ async def _update_proposal_embed(bot, store: ProposalStore, proposal: dict):
 
 def _time_remaining_text(proposal: dict) -> str:
     """Return human-readable time remaining for a proposal (7-day window)"""
-    created = datetime.fromisoformat(proposal['created_at'])
+    created = datetime.fromisoformat(proposal['created_at']).replace(tzinfo=None)
     expires = created + timedelta(days=7)
     now = datetime.utcnow()
     remaining = expires - now
@@ -614,7 +614,7 @@ class ProposalsCog(BaseCog):
         expired_count = 0
         for proposal in self.store.get_active():
             try:
-                created = datetime.fromisoformat(proposal['created_at'])
+                created = datetime.fromisoformat(proposal['created_at']).replace(tzinfo=None)
                 if now - created >= timedelta(days=7):
                     self.store.close(proposal['id'])
                     expired_count += 1
@@ -684,7 +684,7 @@ class ProposalsCog(BaseCog):
         now = datetime.utcnow()
         for proposal in self.store.get_active():
             try:
-                created = datetime.fromisoformat(proposal['created_at'])
+                created = datetime.fromisoformat(proposal['created_at']).replace(tzinfo=None)
                 if now - created >= timedelta(days=7):
                     self.store.close(proposal['id'])
                     self.logger.info(f"Auto-closed proposal #{proposal['id']} after 7 days")
