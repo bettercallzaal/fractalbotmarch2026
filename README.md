@@ -63,6 +63,8 @@ Based on the [Respect Game](https://edenfractal.com/fractal-decision-making-proc
 | `/admin_refresh_intros` | Rebuild intro cache from #intros channel history |
 | `/admin_close_proposal <id>` | Close voting on a proposal and post results |
 | `/admin_delete_proposal <id>` | Delete a proposal entirely |
+| `/admin_reopen_proposal <id>` | Reopen a closed proposal with fresh 7-day window |
+| `/admin_recover_proposals` | Scan #proposals for threads missing from database and recover them |
 | `/admin_end_fractal [thread_id]` | Force end any fractal |
 | `/admin_list_fractals` | List all active fractals |
 | `/admin_cleanup` | Clean up stuck/old fractals |
@@ -359,7 +361,7 @@ npm run dev
 ### Infrastructure
 - Updated `.gitignore` for build artifacts and zip files
 - 48 total slash commands (up from ~30)
-- Production deployment on Bot-Hosting.net
+- Production deployment on bot-hosting.net
 
 ## v1.2 Changelog
 
@@ -374,10 +376,28 @@ npm run dev
 - **Voting window timestamps** — Proposal embeds show when voting opened, when it closes, and dynamic time remaining (e.g. "4d 12h remaining")
 - **Time remaining on listings** — `/proposals` command and the proposals channel index now show time remaining per proposal
 
+## v1.3 Changelog
+
+### Proposal System Fixes
+- **Fix expiry loop crash** — The hourly auto-expiry task would permanently die if any proposal's thread was inaccessible. Each proposal is now wrapped in its own try/except so one failure doesn't kill the entire loop.
+- **Fix timezone-aware datetime crash** — Proposals created on certain server configurations stored timezone-aware timestamps, causing `can't subtract offset-naive and offset-aware datetimes` errors. All datetime parsing now strips timezone info.
+- **Startup catch-up expiry** — On boot, the bot immediately closes any proposals past their 7-day window instead of waiting for the hourly loop. Prevents stale proposals from accumulating between restarts.
+- **Channel fetch fallback** — Expiry and migration now use `fetch_channel()` as fallback when `get_channel()` returns None (stale cache after restart).
+
+### New Admin Commands
+- **`/admin_recover_proposals`** — Scans the #proposals channel for threads that exist in Discord but are missing from `proposals.json`. Parses the bot's embed to extract title, description, type, author, and timestamps, then re-adds them to the database and re-registers voting buttons. Handles both active and recently archived threads.
+- **`/admin_reopen_proposal <id>`** — Reopens a closed proposal with a fresh 7-day voting window. Re-attaches voting buttons and updates the embed.
+
+### UX Improvements
+- **Paginated `/proposals`** — Now accepts an optional `page` parameter (10 proposals per page) so it never hits Discord's embed field limits. Shows total count and page navigation hint.
+- **Title truncation** — Long proposal titles are truncated in the `/proposals` listing to stay within Discord's 256-char field name limit.
+
+### Infrastructure
+- 51 total slash commands (up from 48)
+
 ## Roadmap / Ideas
 
-### Scaling (v1.3)
-- [ ] **Paginated proposals** — Split pinned index and `/proposals` command across pages for 10-15+ proposals
+### Scaling (v1.4)
 - [ ] **Proposal filtering** — Filter by type (text/governance/funding/curate) and status (active/closed)
 - [ ] **Auto-archive** — Move closed proposals to archive after 14 days
 - [ ] **Web proposals page** — Browse and view proposals on the website
