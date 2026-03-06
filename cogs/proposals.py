@@ -604,7 +604,50 @@ class ProposalsCog(BaseCog):
                 view = ProposalVoteView(self.store, pid, bot=self.bot)
             self.bot.add_view(view, message_id=int(proposal['message_id']))
         self._expire_proposals.start()
+        self._catchup_expiry.start()
         self._migrate_buttons.start()
+
+    @tasks.loop(count=1)
+    async def _catchup_expiry(self):
+        """Immediately close any overdue proposals on startup (don't wait for hourly loop)"""
+        now = datetime.utcnow()
+        expired_count = 0
+        for proposal in self.store.get_active():
+            try:
+                created = datetime.fromisoformat(proposal['created_at'])
+                if now - created >= timedelta(days=7):
+                    self.store.close(proposal['id'])
+                    expired_count += 1
+                    self.logger.info(f"Startup expiry: closed proposal #{proposal['id']}")
+                    try:
+                        await _update_proposal_embed(self.bot, self.store, self.store.get(proposal['id']))
+                    except Exception as e:
+                        self.logger.error(f"Failed to update embed for expired proposal #{proposal['id']}: {e}")
+                    try:
+                        thread = self.bot.get_channel(int(proposal['thread_id']))
+                        if not thread:
+                            thread = await self.bot.fetch_channel(int(proposal['thread_id']))
+                        if thread:
+                            summary = self.store.get_vote_summary(proposal['id'])
+                            result_lines = []
+                            for option, data in sorted(summary.items(), key=lambda x: x[1]['weight'], reverse=True):
+                                result_lines.append(f"**{option.upper()}**: {data['count']} votes ({data['weight']:,.0f} Respect)")
+                            result_text = "\n".join(result_lines) if result_lines else "No votes cast."
+                            await thread.send(
+                                f"⏰ **Voting has closed** (7-day limit reached)\n\n"
+                                f"**Final Results:**\n{result_text}"
+                            )
+                    except Exception as e:
+                        self.logger.error(f"Error posting startup closure for proposal #{proposal['id']}: {e}")
+            except Exception as e:
+                self.logger.error(f"Error in startup expiry for proposal #{proposal.get('id', '?')}: {e}")
+        if expired_count:
+            self.logger.info(f"Startup expiry: closed {expired_count} overdue proposals")
+            await self._update_proposals_index()
+
+    @_catchup_expiry.before_loop
+    async def _before_catchup(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(count=1)
     async def _migrate_buttons(self):
@@ -632,6 +675,7 @@ class ProposalsCog(BaseCog):
 
     def cog_unload(self):
         self._expire_proposals.cancel()
+        self._catchup_expiry.cancel()
         self._migrate_buttons.cancel()
 
     @tasks.loop(hours=1)
@@ -639,27 +683,35 @@ class ProposalsCog(BaseCog):
         """Close proposals older than 7 days"""
         now = datetime.utcnow()
         for proposal in self.store.get_active():
-            created = datetime.fromisoformat(proposal['created_at'])
-            if now - created >= timedelta(days=7):
-                self.store.close(proposal['id'])
-                self.logger.info(f"Auto-closed proposal #{proposal['id']} after 7 days")
-                # Update the embed to show it's closed
-                await _update_proposal_embed(self.bot, self.store, self.store.get(proposal['id']))
-                # Post closure notice in the thread
-                try:
-                    thread = self.bot.get_channel(int(proposal['thread_id']))
-                    if thread:
-                        summary = self.store.get_vote_summary(proposal['id'])
-                        result_lines = []
-                        for option, data in sorted(summary.items(), key=lambda x: x[1]['weight'], reverse=True):
-                            result_lines.append(f"**{option.upper()}**: {data['count']} votes ({data['weight']:,.0f} Respect)")
-                        result_text = "\n".join(result_lines) if result_lines else "No votes cast."
-                        await thread.send(
-                            f"⏰ **Voting has closed** (7-day limit reached)\n\n"
-                            f"**Final Results:**\n{result_text}"
-                        )
-                except Exception as e:
-                    self.logger.error(f"Error posting closure for proposal #{proposal['id']}: {e}")
+            try:
+                created = datetime.fromisoformat(proposal['created_at'])
+                if now - created >= timedelta(days=7):
+                    self.store.close(proposal['id'])
+                    self.logger.info(f"Auto-closed proposal #{proposal['id']} after 7 days")
+                    # Update the embed to show it's closed
+                    try:
+                        await _update_proposal_embed(self.bot, self.store, self.store.get(proposal['id']))
+                    except Exception as e:
+                        self.logger.error(f"Failed to update embed for expired proposal #{proposal['id']}: {e}")
+                    # Post closure notice in the thread
+                    try:
+                        thread = self.bot.get_channel(int(proposal['thread_id']))
+                        if not thread:
+                            thread = await self.bot.fetch_channel(int(proposal['thread_id']))
+                        if thread:
+                            summary = self.store.get_vote_summary(proposal['id'])
+                            result_lines = []
+                            for option, data in sorted(summary.items(), key=lambda x: x[1]['weight'], reverse=True):
+                                result_lines.append(f"**{option.upper()}**: {data['count']} votes ({data['weight']:,.0f} Respect)")
+                            result_text = "\n".join(result_lines) if result_lines else "No votes cast."
+                            await thread.send(
+                                f"⏰ **Voting has closed** (7-day limit reached)\n\n"
+                                f"**Final Results:**\n{result_text}"
+                            )
+                    except Exception as e:
+                        self.logger.error(f"Error posting closure for proposal #{proposal['id']}: {e}")
+            except Exception as e:
+                self.logger.error(f"Error processing expiry for proposal #{proposal.get('id', '?')}: {e}")
 
     @_expire_proposals.before_loop
     async def _before_expire(self):
@@ -912,8 +964,9 @@ class ProposalsCog(BaseCog):
         name="proposals",
         description="List all active proposals"
     )
-    async def proposals(self, interaction: discord.Interaction):
-        """List active proposals"""
+    @app_commands.describe(page="Page number (10 proposals per page)")
+    async def proposals(self, interaction: discord.Interaction, page: int = 1):
+        """List active proposals with pagination"""
         await interaction.response.defer(ephemeral=True)
 
         active = self.store.get_active()
@@ -921,24 +974,39 @@ class ProposalsCog(BaseCog):
             await interaction.followup.send("No active proposals.", ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title="\U0001f5f3\ufe0f Active Proposals",
-            color=0x57F287
-        )
+        per_page = 10
+        total_pages = max(1, (len(active) + per_page - 1) // per_page)
+        page = max(1, min(page, total_pages))
+        start = (page - 1) * per_page
+        page_proposals = active[start:start + per_page]
 
-        for p in active:
+        title = f"\U0001f5f3\ufe0f Active Proposals ({len(active)})"
+        if total_pages > 1:
+            title += f" — Page {page}/{total_pages}"
+
+        embed = discord.Embed(title=title, color=0x57F287)
+
+        for p in page_proposals:
             emoji = TYPE_EMOJIS.get(p['type'], '\U0001f4dd')
             summary = self.store.get_vote_summary(p['id'])
             total_voters = sum(s['count'] for s in summary.values()) if summary else 0
             total_respect = sum(s['weight'] for s in summary.values()) if summary else 0
             time_left = _time_remaining_text(p)
+            # Truncate title to stay within field name limit (256 chars)
+            field_title = f"{emoji} #{p['id']} \u2014 {p['title']}"
+            if len(field_title) > 250:
+                field_title = field_title[:247] + "..."
             embed.add_field(
-                name=f"{emoji} #{p['id']} \u2014 {p['title']}",
+                name=field_title,
                 value=f"{total_voters} voters \u2022 {total_respect:,.0f} Respect \u2022 {time_left}\n<#{p['thread_id']}>",
                 inline=False
             )
 
-        embed.set_footer(text="ZAO Fractal \u2022 zao.frapps.xyz")
+        if total_pages > 1:
+            embed.set_footer(text=f"Page {page}/{total_pages} \u2022 Use /proposals page:<n> for more \u2022 ZAO Fractal")
+        else:
+            embed.set_footer(text="ZAO Fractal \u2022 zao.frapps.xyz")
+
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(
@@ -1047,6 +1115,238 @@ class ProposalsCog(BaseCog):
             await interaction.followup.send(
                 f"Proposal #{proposal_id} not found.", ephemeral=True
             )
+
+
+    @app_commands.command(
+        name="admin_reopen_proposal",
+        description="[ADMIN] Reopen a closed proposal so voting can continue"
+    )
+    @app_commands.describe(proposal_id="The proposal number to reopen")
+    async def admin_reopen_proposal(self, interaction: discord.Interaction, proposal_id: int):
+        """Reopen a closed proposal"""
+        await interaction.response.defer(ephemeral=True)
+
+        if not self.is_supreme_admin(interaction.user):
+            await interaction.followup.send(
+                "You need the **Supreme Admin** role to use this command.",
+                ephemeral=True
+            )
+            return
+
+        proposal = self.store.get(str(proposal_id))
+        if not proposal:
+            await interaction.followup.send(
+                f"Proposal #{proposal_id} not found.", ephemeral=True
+            )
+            return
+
+        if proposal['status'] == 'active':
+            await interaction.followup.send(
+                f"Proposal #{proposal_id} is already active.", ephemeral=True
+            )
+            return
+
+        # Reopen: set status back to active, reset created_at to now for a fresh 7-day window
+        proposal['status'] = 'active'
+        proposal['created_at'] = datetime.utcnow().isoformat()
+        if 'closed_at' in proposal:
+            del proposal['closed_at']
+        self.store._save()
+
+        # Re-register voting view
+        pid = proposal['id']
+        if proposal['type'] == 'governance' and proposal.get('options'):
+            view = GovernanceVoteView(self.store, pid, proposal['options'], bot=self.bot)
+        else:
+            view = ProposalVoteView(self.store, pid, bot=self.bot)
+        self.bot.add_view(view, message_id=int(proposal['message_id']))
+
+        # Update the embed
+        await _update_proposal_embed(self.bot, self.store, proposal)
+
+        # Re-attach buttons to the message
+        try:
+            thread = self.bot.get_channel(int(proposal['thread_id']))
+            if not thread:
+                thread = await self.bot.fetch_channel(int(proposal['thread_id']))
+            if thread:
+                msg = await thread.fetch_message(int(proposal['message_id']))
+                embed = _build_proposal_embed(proposal, self.store)
+                await msg.edit(embed=embed, view=view)
+                await thread.send(
+                    f"**Proposal reopened by admin!** Voting continues for 7 more days."
+                )
+        except Exception as e:
+            self.logger.error(f"Error updating reopened proposal embed: {e}")
+
+        await self._update_proposals_index()
+        await interaction.followup.send(
+            f"Proposal #{proposal_id} reopened with a fresh 7-day voting window.",
+            ephemeral=True
+        )
+
+    @app_commands.command(
+        name="admin_recover_proposals",
+        description="[ADMIN] Scan #proposals channel for threads missing from the database and recover them"
+    )
+    async def admin_recover_proposals(self, interaction: discord.Interaction):
+        """Scan the proposals channel for threads that exist in Discord but are missing from proposals.json"""
+        await interaction.response.defer(ephemeral=True)
+
+        if not self.is_supreme_admin(interaction.user):
+            await interaction.followup.send(
+                "You need the **Supreme Admin** role to use this command.",
+                ephemeral=True
+            )
+            return
+
+        channel = await self._get_proposals_channel()
+        if not channel:
+            await interaction.followup.send(
+                "Proposals channel not found.", ephemeral=True
+            )
+            return
+
+        # Get all known thread IDs from the store
+        known_thread_ids = set()
+        for p in self.store._data['proposals'].values():
+            known_thread_ids.add(str(p['thread_id']))
+
+        # Scan all threads (active + archived) in the proposals channel
+        recovered = []
+        skipped = []
+        errors = []
+
+        # Active threads
+        all_threads = channel.threads.copy()
+
+        # Also fetch archived threads
+        try:
+            async for thread in channel.archived_threads(limit=100):
+                all_threads.append(thread)
+        except Exception as e:
+            self.logger.error(f"Error fetching archived threads: {e}")
+
+        for thread in all_threads:
+            if str(thread.id) in known_thread_ids:
+                continue  # Already in the store
+
+            if not thread.name.startswith("Proposal:"):
+                continue  # Not a proposal thread
+
+            try:
+                # Find the bot's first message with an embed (the proposal message)
+                bot_message = None
+                async for msg in thread.history(limit=5, oldest_first=True):
+                    if msg.author.id == self.bot.user.id and msg.embeds:
+                        bot_message = msg
+                        break
+
+                if not bot_message or not bot_message.embeds:
+                    skipped.append(thread.name)
+                    continue
+
+                embed = bot_message.embeds[0]
+
+                # Parse proposal data from the embed
+                title = embed.title or thread.name.replace("Proposal: ", "")
+                # Remove type emoji prefix if present
+                for emoji in TYPE_EMOJIS.values():
+                    if title.startswith(emoji):
+                        title = title[len(emoji):].strip()
+                        break
+
+                description = embed.description or ""
+                project_url = embed.url
+                image_url = embed.thumbnail.url if embed.thumbnail else None
+
+                # Determine type from title/description
+                proposal_type = 'text'
+                if title.startswith("Curate:") or "Should the ZAO fund this project?" in description:
+                    proposal_type = 'curate'
+                elif "Funding Amount" in description:
+                    proposal_type = 'funding'
+
+                # Try to extract author from description ("Proposed by @user")
+                author_id = str(self.bot.user.id)  # fallback to bot
+                author_match = re.search(r'Proposed by <@(\d+)>', description)
+                if author_match:
+                    author_id = author_match.group(1)
+
+                # Use the message creation time as created_at
+                created_at = bot_message.created_at.isoformat()
+
+                # Check if the 7-day window has passed
+                age = datetime.utcnow() - bot_message.created_at.replace(tzinfo=None)
+                status = 'closed' if age >= timedelta(days=7) else 'active'
+
+                # Create the proposal in the store
+                pid = str(self.store._data['next_id'])
+                self.store._data['next_id'] += 1
+
+                proposal = {
+                    'id': pid,
+                    'title': title,
+                    'description': description,
+                    'type': proposal_type,
+                    'author_id': author_id,
+                    'thread_id': str(thread.id),
+                    'message_id': str(bot_message.id),
+                    'status': status,
+                    'votes': {},
+                    'options': [],
+                    'funding_amount': None,
+                    'image_url': image_url,
+                    'project_url': project_url,
+                    'created_at': created_at
+                }
+
+                self.store._data['proposals'][pid] = proposal
+                recovered.append(f"#{pid} — {title} ({status})")
+
+                # Register voting view if active
+                if status == 'active':
+                    view = ProposalVoteView(self.store, pid, bot=self.bot)
+                    self.bot.add_view(view, message_id=bot_message.id)
+                    # Update the embed with proper formatting
+                    try:
+                        new_embed = _build_proposal_embed(proposal, self.store)
+                        await bot_message.edit(embed=new_embed, view=view)
+                    except Exception as e:
+                        self.logger.error(f"Error updating recovered proposal embed: {e}")
+
+            except Exception as e:
+                errors.append(f"{thread.name}: {str(e)[:80]}")
+                self.logger.error(f"Error recovering thread {thread.name}: {e}", exc_info=True)
+
+        # Save all recovered proposals
+        if recovered:
+            self.store._save()
+            await self._update_proposals_index()
+
+        # Build report
+        report = f"**Proposal Recovery Report**\n\n"
+        report += f"Threads scanned: {len(all_threads)}\n"
+        report += f"Already tracked: {len(known_thread_ids)}\n\n"
+
+        if recovered:
+            report += f"**Recovered ({len(recovered)}):**\n"
+            for r in recovered:
+                report += f"+ {r}\n"
+        else:
+            report += "No missing proposals found.\n"
+
+        if skipped:
+            report += f"\n**Skipped ({len(skipped)}):** (no bot embed found)\n"
+            for s in skipped:
+                report += f"- {s}\n"
+
+        if errors:
+            report += f"\n**Errors ({len(errors)}):**\n"
+            for e in errors:
+                report += f"! {e}\n"
+
+        await interaction.followup.send(report, ephemeral=True)
 
 
 async def setup(bot):
