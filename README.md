@@ -556,26 +556,50 @@ npm run dev
 - Added `test_timer.py` — Minimal 2-command test bot for isolating slash command bugs
 - Comprehensive README rewrite with full meeting userflow documentation
 
-## Roadmap / Ideas
+## v1.6 Changelog
 
-### Scaling (v1.4)
-- [ ] **Proposal filtering** — Filter by type (text/governance/funding/curate) and status (active/closed)
-- [ ] **Auto-archive** — Move closed proposals to archive after 14 days
-- [ ] **Web proposals page** — Browse and view proposals on the website
+### Codebase Audit & Fixes
+- **Atomic JSON writes** — All 5 data stores (`wallets.json`, `proposals.json`, `history.json`, `intros.json`, `hats_roles.json`) now use `utils/safe_json.atomic_save()` which writes to a temp file then does an atomic `os.replace()`, preventing data corruption on crash or power loss
+- **URL injection fix** — Fractal submit URLs now use `urllib.parse.urlencode()` for safe parameter encoding instead of string concatenation
+- **Bare except removal** — Replaced all bare `except:` clauses with specific exception types (`discord.NotFound`, `discord.HTTPException`, `ValueError`, etc.) and added logging
+- **Concurrency lock** — Added `asyncio.Lock` around `active_groups` dict in the fractal cog to prevent race conditions from rapid double-clicks on `/zaofractal`
+- **Timezone consistency** — Replaced all deprecated `datetime.utcnow()` calls with `datetime.now(timezone.utc)` and added `_parse_utc()` helper for safe parsing of mixed timezone-naive/aware ISO strings in legacy data
 
-### UX Improvements
-- [ ] **Vote timeout** — Auto-advance or warn if a round goes too long without reaching threshold
-- [ ] **Auto-split into groups** — For larger meetings (7+ people in voice), automatically split into balanced groups of 3-6
-- [ ] **Mid-fractal member handling** — Gracefully handle someone leaving voice/Discord mid-fractal
-- [ ] **Facilitator rotation** — Track who's facilitated before and suggest/auto-assign facilitators fairly
+### Documentation
+- **Comprehensive docstrings** — Every Python file now has a module-level docstring, and every class/method has a docstring with Args/Returns sections
+- **Inline comments** — Non-obvious logic throughout the codebase is annotated: ABI encoding, vote threshold math, Discord interaction patterns, atomic write strategy, closure-based callbacks, cache TTL behavior, and more
+- **2,695 lines of documentation** added across 15 files with zero logic changes
 
-### Onchain / Web
-- [ ] **Transaction verification** — Listen for onchain tx after submitBreakout and confirm back in Discord
-- [ ] **Web voting** — Vote on proposals from the website (not just Discord)
+## Next Steps / Roadmap
 
-### Operational
-- [ ] **Scheduled fractals** — `/schedule` command for recurring weekly fractals with reminders
-- [ ] **Multi-group coordination** — "Fractal master" view showing status of all groups running in parallel
+### v1.6 — Reliability & Polish
+- [ ] **Rate limiting on `/propose`** — Add a cooldown (e.g. 1 proposal per user per hour) to prevent spam
+- [ ] **Proposal index overflow guard** — Ensure the pinned proposals index embed stays under Discord's 6000-char limit
+- [ ] **Vote timeout** — Auto-advance or warn if a voting round goes too long without reaching threshold
+- [ ] **Mid-fractal member handling** — Gracefully handle someone leaving voice/Discord mid-fractal (remove from candidates, adjust threshold)
+- [ ] **Async JSON I/O** — Move blocking `json.load()`/`json.dump()` calls to `asyncio.to_thread()` so large files don't stall the event loop
+- [ ] **Error alerting** — DM the Supreme Admin or post to an admin channel when background tasks (expiry loop, hat sync) encounter errors
+
+### v1.7 — Proposals & Governance
+- [ ] **Proposal filtering** — Filter `/proposals` by type (text/governance/funding/curate) and status (active/closed)
+- [ ] **Auto-archive** — Move closed proposals to an archive category after 14 days
+- [ ] **Proposal reminders** — Ping voters 24 hours before a proposal closes if they haven't voted
+- [ ] **Quorum requirements** — Minimum vote count or Respect threshold for a proposal to pass
+- [ ] **Web proposals page** — Browse, search, and vote on proposals from the website
+
+### v1.8 — Meeting Experience
+- [ ] **Facilitator rotation** — Track who's facilitated before and suggest/auto-assign facilitators fairly across weeks
+- [ ] **Scheduled fractals** — `/schedule` command for recurring weekly fractals with Discord event integration and reminders
+- [ ] **Multi-group coordination** — "Fractal master" dashboard showing status of all groups running in parallel
+- [ ] **Post-meeting summary** — Auto-generate a recap embed after all groups finish (total participants, all rankings, Respect distributed)
+- [ ] **Presentation notes** — Let speakers optionally attach a link or short description to their turn for the meeting record
+
+### Future — Onchain & Integrations
+- [ ] **Transaction verification** — Listen for onchain tx after submitBreakout and confirm back in Discord with a checkmark
+- [ ] **Web voting** — Vote on proposals from the website (Discord OAuth, same Respect weighting)
+- [ ] **Snapshot integration** — Cross-post proposals to Snapshot for formal governance votes
+- [ ] **POAP / attendance tokens** — Auto-distribute attendance POAPs or tokens to fractal participants
+- [ ] **Multi-server support** — Allow the bot to run in multiple Discord servers with per-server config
 
 ## Links
 
