@@ -6,7 +6,21 @@ import os
 from typing import Optional, List, Dict
 from utils.web_integration import web_integration
 
-PING_SOUND = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets', 'ping.mp3')
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'assets')
+PING_SOUND = os.path.join(ASSETS_DIR, 'ping.mp3')
+
+# Different sounds per level (ascending pitch as levels get more intense)
+LEVEL_SOUNDS = {
+    6: os.path.join(ASSETS_DIR, 'level6.mp3'),
+    5: os.path.join(ASSETS_DIR, 'level5.mp3'),
+    4: os.path.join(ASSETS_DIR, 'level4.mp3'),
+    3: os.path.join(ASSETS_DIR, 'level3.mp3'),
+    2: os.path.join(ASSETS_DIR, 'level2.mp3'),
+    1: os.path.join(ASSETS_DIR, 'level1.mp3'),
+}
+
+# How long the bot stays in voice before auto-disconnecting (seconds)
+VOICE_STAY_DURATION = 300  # 5 minutes
 
 class FractalGroup:
     """Core class for managing a fractal voting group"""
@@ -24,6 +38,7 @@ class FractalGroup:
         self.cog = cog
         self.voice_channel = None  # Set by FractalNameModal after creation
         self.logger = logging.getLogger('bot')
+        self._voice_disconnect_task = None  # Track auto-disconnect timer
 
         self.logger.info(f"Created fractal group '{thread.name}' with facilitator {facilitator.display_name} and {len(members)} members")
 
@@ -116,7 +131,7 @@ class FractalGroup:
         return max(1, len(self.members) // 2 + len(self.members) % 2)  # Ceiling division
 
     async def notify_voice_channel(self):
-        """Send a link to the voting thread in the voice channel text chat and play a ping sound"""
+        """Send a link to the voting thread in the voice channel text chat and play a level-specific sound"""
         if not self.voice_channel:
             return
 
@@ -129,12 +144,16 @@ class FractalGroup:
         except Exception as e:
             self.logger.error(f"Failed to send voice channel notification: {e}")
 
+        # Pick the sound for this level (fallback to ping.mp3)
+        sound_file = LEVEL_SOUNDS.get(self.current_level, PING_SOUND)
+        if not os.path.exists(sound_file):
+            sound_file = PING_SOUND
+        if not os.path.exists(sound_file):
+            self.logger.warning(f"No sound file found for level {self.current_level}")
+            return
+
         # Play audio ping in voice channel
         try:
-            if not os.path.exists(PING_SOUND):
-                self.logger.warning(f"Ping sound not found at {PING_SOUND}")
-                return
-
             guild = self.thread.guild
             voice_client = guild.voice_client
 
@@ -161,17 +180,16 @@ class FractalGroup:
                 self.logger.warning("Voice client not connected after wait")
                 return
 
-            # Play the ping sound
+            # Play the level sound
             if voice_client.is_playing():
                 voice_client.stop()
 
-            source = discord.FFmpegPCMAudio(PING_SOUND)
-            voice_client.play(
-                source,
-                after=lambda e: asyncio.run_coroutine_threadsafe(
-                    self._disconnect_after_ping(voice_client), self.cog.bot.loop
-                )
-            )
+            source = discord.FFmpegPCMAudio(sound_file)
+            voice_client.play(source)
+
+            # Reset the 5-minute auto-disconnect timer
+            self._schedule_voice_disconnect(voice_client)
+
         except Exception as e:
             self.logger.error(f"Failed to play audio ping: {e}", exc_info=True)
             try:
@@ -181,12 +199,25 @@ class FractalGroup:
             except Exception:
                 pass
 
-    async def _disconnect_after_ping(self, voice_client):
-        """Disconnect from voice after the ping finishes"""
-        await asyncio.sleep(3)
+    def _schedule_voice_disconnect(self, voice_client):
+        """Schedule auto-disconnect after 5 minutes of inactivity. Resets on each new round."""
+        # Cancel previous disconnect timer if any
+        if self._voice_disconnect_task and not self._voice_disconnect_task.done():
+            self._voice_disconnect_task.cancel()
+
+        self._voice_disconnect_task = asyncio.create_task(
+            self._auto_disconnect(voice_client)
+        )
+
+    async def _auto_disconnect(self, voice_client):
+        """Disconnect from voice after VOICE_STAY_DURATION seconds"""
         try:
+            await asyncio.sleep(VOICE_STAY_DURATION)
             if voice_client and voice_client.is_connected():
                 await voice_client.disconnect()
+                self.logger.info(f"Auto-disconnected from voice after {VOICE_STAY_DURATION}s")
+        except asyncio.CancelledError:
+            pass  # Timer was reset by a new round
         except Exception:
             pass
 

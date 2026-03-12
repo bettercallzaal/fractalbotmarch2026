@@ -3,10 +3,12 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 import random
+import math
 from datetime import datetime
 from ..base import BaseCog
 from .views import MemberConfirmationView
 from .group import FractalGroup
+from config.config import INTROS_CHANNEL_ID
 
 class FractalCog(BaseCog):
     """Cog for handling ZAO Fractal voting commands and logic"""
@@ -68,28 +70,48 @@ class FractalCog(BaseCog):
         # Store custom name for use in confirmation view
         custom_name = name
 
-        # Check wallet status for each member
+        # Check wallet and intro status for each member
         registry = getattr(self.bot, 'wallet_registry', None)
         self.logger.info(f"Wallet registry available: {registry is not None}")
-        with_wallet = []
+
+        # Get intro cache from IntroCog
+        intro_cog = self.bot.get_cog('IntroCog')
+        intro_cache = intro_cog.intro_cache if intro_cog else None
+
+        member_status = []
         without_wallet = []
+        without_intro = []
         for member in members:
             wallet = registry.lookup(member) if registry else None
+            has_intro = bool(intro_cache.get(member.id)) if intro_cache else None
             self.logger.info(f"Wallet lookup for {member.display_name} (id={member.id}, name={member.name}, global={member.global_name}): {wallet}")
-            if wallet:
-                with_wallet.append(member)
-            else:
+            if not wallet:
                 without_wallet.append(member)
+            if not has_intro:
+                without_intro.append(member)
+            member_status.append((member, wallet, has_intro))
 
-        # Build confirmation message with wallet status
+        # Build confirmation message with wallet + intro status
         lines = [f"**Start fractal{f' ({custom_name})' if custom_name else ''}?**\n"]
-        for member in with_wallet:
-            lines.append(f"✅ {member.mention}")
-        for member in without_wallet:
-            lines.append(f"❌ {member.mention} — no wallet")
+        for member, wallet, has_intro in member_status:
+            wallet_icon = "✅" if wallet else "❌"
+            intro_icon = "📝" if has_intro else "📭"
+            issues = []
+            if not wallet:
+                issues.append("no wallet")
+            if not has_intro:
+                issues.append("no intro")
+            suffix = f" — {', '.join(issues)}" if issues else ""
+            lines.append(f"{wallet_icon}{intro_icon} {member.mention}{suffix}")
 
+        warnings = []
         if without_wallet:
-            lines.append(f"\n⚠️ **{len(without_wallet)}** member(s) have no wallet. They should `/register` before results are submitted onchain.")
+            warnings.append(f"⚠️ **{len(without_wallet)}** member(s) have no wallet. They should `/register` before results are submitted onchain.")
+        if without_intro:
+            warnings.append(f"📭 **{len(without_intro)}** member(s) have no intro. They should post in <#{INTROS_CHANNEL_ID}>.")
+        if warnings:
+            lines.append("")
+            lines.extend(warnings)
 
         confirm_msg = "\n".join(lines)
 
@@ -102,6 +124,148 @@ class FractalCog(BaseCog):
                 f"{interaction.user.mention} {confirm_msg}",
                 view=view
             )
+
+    @app_commands.command(
+        name="randomize",
+        description="Split members from Fractal Waiting Room into fractal rooms (max 6 per room)"
+    )
+    @app_commands.describe(
+        facilitator_1="Facilitator for fractal-1",
+        facilitator_2="Facilitator for fractal-2",
+        facilitator_3="Facilitator for fractal-3",
+        facilitator_4="Facilitator for fractal-4",
+        facilitator_5="Facilitator for fractal-5",
+        facilitator_6="Facilitator for fractal-6",
+    )
+    async def randomize(
+        self,
+        interaction: discord.Interaction,
+        facilitator_1: discord.Member = None,
+        facilitator_2: discord.Member = None,
+        facilitator_3: discord.Member = None,
+        facilitator_4: discord.Member = None,
+        facilitator_5: discord.Member = None,
+        facilitator_6: discord.Member = None,
+    ):
+        """Randomly split waiting room members into fractal-1, fractal-2, etc."""
+        await interaction.response.defer(ephemeral=True)
+
+        if not self.is_supreme_admin(interaction.user):
+            await interaction.followup.send("❌ You need the **Supreme Admin** role to use this command.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+
+        # Collect facilitator assignments (index -> member)
+        facilitator_params = [facilitator_1, facilitator_2, facilitator_3, facilitator_4, facilitator_5, facilitator_6]
+        facilitators = {}  # room index (0-based) -> member
+        for i, fac in enumerate(facilitator_params):
+            if fac is not None:
+                facilitators[i] = fac
+
+        # Find the Fractal Waiting Room voice channel (case-insensitive)
+        waiting_room = None
+        for channel in guild.voice_channels:
+            if "fractal waiting room" in channel.name.lower():
+                waiting_room = channel
+                break
+
+        if not waiting_room:
+            await interaction.followup.send("❌ Could not find a **Fractal Waiting Room** voice channel.", ephemeral=True)
+            return
+
+        # Get non-bot members in waiting room
+        all_members = [m for m in waiting_room.members if not m.bot]
+
+        # Separate facilitators from the random pool
+        facilitator_ids = {fac.id for fac in facilitators.values()}
+        random_pool = [m for m in all_members if m.id not in facilitator_ids]
+
+        # Check if any assigned facilitators aren't in the waiting room
+        waiting_ids = {m.id for m in all_members}
+        not_in_room = [fac for fac in facilitators.values() if fac.id not in waiting_ids]
+        if not_in_room:
+            names = ", ".join(f.display_name for f in not_in_room)
+            await interaction.followup.send(
+                f"❌ These facilitators are not in the Fractal Waiting Room: **{names}**",
+                ephemeral=True
+            )
+            return
+
+        total_people = len(all_members)
+        if total_people < 2:
+            await interaction.followup.send("❌ Need at least 2 members in the Fractal Waiting Room to randomize.", ephemeral=True)
+            return
+
+        # Determine number of groups: at least enough for all people, and at least enough for the highest facilitator slot
+        min_groups_for_people = math.ceil(total_people / 6)
+        min_groups_for_facilitators = (max(facilitators.keys()) + 1) if facilitators else 0
+        num_groups = max(min_groups_for_people, min_groups_for_facilitators)
+
+        # Find or validate fractal room channels (fractal-1, fractal-2, etc.)
+        fractal_rooms = []
+        missing_rooms = []
+        for i in range(1, num_groups + 1):
+            room = None
+            for channel in guild.voice_channels:
+                if channel.name.lower() == f"fractal-{i}":
+                    room = channel
+                    break
+            if room:
+                fractal_rooms.append(room)
+            else:
+                missing_rooms.append(f"fractal-{i}")
+
+        if missing_rooms:
+            await interaction.followup.send(
+                f"❌ Missing voice channels: **{', '.join(missing_rooms)}**\n"
+                f"Please create these voice channels first.",
+                ephemeral=True
+            )
+            return
+
+        # Pre-assign facilitators to their rooms
+        groups = [[] for _ in range(num_groups)]
+        group_facilitators = {}  # room index -> facilitator member
+        for room_idx, fac in facilitators.items():
+            groups[room_idx].append(fac)
+            group_facilitators[room_idx] = fac
+
+        # Shuffle remaining members randomly
+        random.shuffle(random_pool)
+
+        # Distribute remaining members evenly via round-robin, respecting max 6
+        for member in random_pool:
+            # Find the group with the fewest members (that isn't full)
+            min_idx = min(range(num_groups), key=lambda idx: len(groups[idx]))
+            groups[min_idx].append(member)
+
+        # Move members to their assigned rooms
+        move_results = []
+        failed_moves = []
+        for group_idx, group_members in enumerate(groups):
+            room = fractal_rooms[group_idx]
+            fac = group_facilitators.get(group_idx)
+            for member in group_members:
+                try:
+                    await member.move_to(room)
+                except discord.HTTPException as e:
+                    failed_moves.append((member, str(e)))
+
+            member_names = ", ".join(m.display_name for m in group_members)
+            fac_label = f" | Facilitator: **{fac.display_name}**" if fac else ""
+            move_results.append(f"**{room.name}** ({len(group_members)}){fac_label}\n> {member_names}")
+
+        # Build result message
+        msg = f"# Randomized {total_people} members into {num_groups} groups\n\n"
+        msg += "\n\n".join(move_results)
+
+        if failed_moves:
+            msg += f"\n\n⚠️ Failed to move {len(failed_moves)} member(s):"
+            for member, error in failed_moves:
+                msg += f"\n• {member.display_name}: {error}"
+
+        await interaction.followup.send(msg, ephemeral=True)
 
     @app_commands.command(
         name="endgroup",

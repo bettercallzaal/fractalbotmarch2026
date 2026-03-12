@@ -1,16 +1,83 @@
 # ZAO Fractal Bot
 
-Discord bot for running ZAO Fractal voting — a fractal democracy system where small groups reach consensus on contribution rankings and earn onchain Respect tokens.
+A comprehensive Discord bot for running ZAO Fractal — a fractal democracy system where small groups present their contributions, reach consensus on rankings through structured voting, and earn onchain Respect tokens on Optimism.
 
 Based on the [Respect Game](https://edenfractal.com/fractal-decision-making-processes) pioneered by Eden Fractal and Optimism Fractal.
 
-## How It Works
+## What It Does
 
-1. **Group up** — 2-6 people join a voice channel
-2. **Start fractal** — Facilitator runs `/zaofractal`, confirms members, then enters the fractal number and group number via a popup modal
-3. **Vote** — Members vote on who contributed most using colored button UI (Levels 6 → 1). Each round, the bot joins voice to play an audio ping and posts a voting link in the voice channel text chat.
-4. **Results** — Bot posts a rich embed to the general channel with final rankings, Respect points earned, and a one-click link to submit results onchain
-5. **Earn Respect** — Rankings are submitted to the ZAO Respect contract on Optimism via [zao.frapps.xyz](https://zao.frapps.xyz)
+ZAO Fractal Bot is the complete toolchain for running weekly fractal governance meetings inside Discord. It handles every stage of the process:
+
+- **Meeting setup** — Split participants into small groups, assign facilitators, move members into voice rooms
+- **Presentations** — Interactive timer system with speaker queue, countdowns, reactions, and intro previews so group members can get to know each other
+- **Voting** — Structured multi-round voting (Level 6 down to Level 1) with colored button UI, public vote announcements, and automatic winner detection
+- **Results & onchain submission** — Final rankings posted with Respect points earned and a one-click link to submit results to the ZAO Respect smart contract on Optimism
+- **Governance** — Proposal system with Respect-weighted voting, threaded discussion, and 7-day auto-expiry
+- **Member management** — Wallet registration (with ENS resolution), intro caching, hat-based role sync, leaderboards, and fractal history tracking
+
+## Full Meeting Userflow
+
+Here's the complete flow for running a weekly ZAO Fractal meeting from start to finish:
+
+### Phase 1: Gathering (Before the Meeting)
+
+1. Members join the **Fractal Waiting Room** voice channel
+2. Members should have already:
+   - Registered their wallet with `/register <wallet or ENS>` (needed for onchain submission)
+   - Posted an introduction in the #intros channel (shown during presentations)
+
+### Phase 2: Randomization (Admin)
+
+3. Admin runs **`/randomize`** to split waiting room members into fractal rooms
+   - Members are evenly distributed across fractal-1, fractal-2, etc. (max 6 per room)
+   - Optional: pre-assign facilitators with `facilitator_1` through `facilitator_6` parameters
+   - Bot automatically moves members into their assigned voice rooms via Discord
+
+### Phase 3: Presentations (Each Group)
+
+4. Facilitator runs **`/timer`** in the group's text channel
+   - Bot detects all non-bot members in the facilitator's voice channel
+   - A rich embed appears with the first speaker's name, a countdown timer, and a "Meet Your Group" section showing 2-line intro previews for each member
+   - Members missing intros are @mentioned with a prompt to post one
+5. **Each speaker presents** for their allotted time (default 4 minutes)
+   - **Interactive controls** available to everyone:
+     - **I'm Done** — End your turn early
+     - **Skip** — Skip the current speaker
+     - **Come Back** — Defer to end of queue, come back after everyone else
+     - **+1 Min** — Add extra time
+     - **Hand** — Raise/lower hand with notification to speaker
+     - **Pause/Resume** — Pause the countdown
+     - **Pick Next** — Dropdown to reorder the queue
+   - **Reactions**: Fire, Clap — stackable counters displayed live on the embed
+   - **Time warnings** at 1 minute and 30 seconds (embed turns red, speaker pinged)
+6. When all speakers finish, embed updates to "Presentations Complete — Ready to start voting!"
+
+### Phase 4: Fractal Voting (Each Group)
+
+7. Facilitator runs **`/zaofractal`** to create the voting session
+   - Bot shows a confirmation embed with all members, their wallet status, and intro status
+   - Facilitator clicks **Start Fractal** and enters the fractal number and group number in a popup modal
+   - Bot creates a dedicated thread (e.g. "Fractal 5 - Group 2") and adds all members
+8. **Voting begins at Level 6** (highest rank)
+   - Bot posts a voting message with colored buttons — one per candidate
+   - Bot joins voice to play a level-specific audio ping and posts a link to the voting thread in voice chat
+   - Each member clicks the button of who they think contributed most
+   - Votes are announced publicly in the thread ("New Vote: @user voted for @candidate")
+   - Members can change their vote at any time
+   - When a candidate reaches the vote threshold (majority), they win the round
+9. **Voting continues down through Level 5, 4, 3, 2, 1**
+   - Each round's winner is removed from the candidate pool
+   - Ties are broken by random selection
+   - Bot plays ascending-pitch audio for each level
+
+### Phase 5: Results & Onchain Submission
+
+10. When all levels are decided, the bot posts **final results** showing:
+    - Rankings with medal emojis and Respect points earned per member
+    - A pre-filled link to [zao.frapps.xyz/submitBreakout](https://zao.frapps.xyz/submitBreakout) with all wallet addresses
+    - @mentions everyone to go vote and confirm results onchain
+11. Results are also posted to **#general** as a rich embed with the submit link
+12. Results are automatically logged to **fractal history** for stats tracking
 
 ### Respect Points (Year 2 — 2x Fibonacci)
 
@@ -42,7 +109,8 @@ Based on the [Respect Game](https://edenfractal.com/fractal-decision-making-proc
 | `/proposals` | List all active proposals |
 | `/proposal <id>` | View details and vote breakdown for a proposal |
 | `/leaderboard` | View top 10 onchain Respect balances inline in Discord |
-| `/timer [minutes] [shuffle]` | Start a presentation timer for voice channel members |
+| `/randomize [facilitator_1..6]` | Split Fractal Waiting Room members into fractal rooms (max 6 per room) |
+| `/timer [minutes] [shuffle]` | Start an interactive presentation timer for voice channel members |
 | `/timer_add [minutes]` | Add extra time to the current speaker |
 | `/history [query]` | Search completed fractals by member, group, or fractal number |
 | `/mystats [@user]` | View cumulative fractal stats and Respect earned |
@@ -87,11 +155,18 @@ Based on the [Respect Game](https://edenfractal.com/fractal-decision-making-proc
 
 ## Introduction Lookup
 
-The `/intro` command lets anyone look up a member's introduction from the #intros channel:
+The bot integrates with the #intros channel in two ways:
 
+### Manual Lookup (`/intro @user`)
 - **Cached** — Intros are fetched once from channel history and cached in `data/intros.json`
 - **Rich embed** — Shows intro text, link to their [thezao.com](https://thezao.com) community page, and wallet address if registered
 - **Admin refresh** — `/admin_refresh_intros` rebuilds the entire cache from channel history
+
+### Auto Intros on `/timer`
+When `/timer` starts, the bot automatically sends a **"Meet Your Group"** embed to the channel before the timer begins:
+- **1-2 line preview** of each member's intro with a **[read more]** link that jumps to the full intro message in #intros
+- **Missing intro prompt** — Members without intros are @mentioned: "Post your intro in #intros so your group can get to know you!"
+- This helps group members get to know each other before presentations begin
 
 ## Proposal & Curation System
 
@@ -178,16 +253,34 @@ Every completed fractal is automatically logged to `data/history.json`:
 - **`/rankings`** — Cumulative Respect leaderboard from all recorded fractal history
 - Auto-records rankings, Respect points, facilitator, fractal/group number, and timestamp
 
+## Room Randomizer
+
+Run `/randomize` to split members from the Fractal Waiting Room voice channel into fractal rooms:
+
+- **Even distribution** — Members split evenly across fractal-1, fractal-2, etc. (max 6 per room)
+- **Facilitator assignment** — Optional `facilitator_1` through `facilitator_6` parameters to pre-assign facilitators to each room (facilitators are moved first)
+- **Auto-move** — Bot moves members into their assigned rooms via Discord voice
+
 ## Presentation Timer
 
-Run `/timer` before voting to give each member structured speaking time:
+Run `/timer` before `/zaofractal` to give each member structured speaking time. This is the introduction/presentation phase where members share what they've been working on.
 
-- **Auto-detects speakers** from your voice channel (2-6 members)
-- **Live countdown** using Discord's built-in relative timestamps (updates client-side)
-- **Facilitator controls** — Skip, Pause, Resume, and Stop buttons
-- **`/timer_add`** — Add extra minutes to the current speaker if needed
+- **Auto-detects speakers** from your voice channel (1-6 members)
+- **4-minute default** — Configurable 1-30 minutes per speaker via `minutes` parameter
+- **Anyone can control** — All buttons available to everyone, not just the facilitator
+- **Single consolidated embed** — One rich embed tracks speaker, countdown, reactions, queue, and intro previews
+- **Interactive controls** (Row 1): I'm Done, Skip, Come Back, +1 Min, Hand
+- **Timer controls + reactions** (Row 2): Pause/Resume, Stop, Fire, Clap
+- **Pick Next dropdown** (Row 3): Select menu to reorder the queue and pick who goes next
+- **Stackable emoji reactions** — Every click adds +1 (not a toggle), shown as live counters on the embed
+- **Raise Hand** — Toggle hand raise with notification to the current speaker
+- **Come Back** — Defers current speaker to the end of the queue
+- **I'm Done** — Current speaker ends their turn early
+- **Time warnings** — Embed color changes at 1-minute (yellow) and 30-second (red) marks with speaker ping
+- **"Meet Your Group" section** — Shows a compact 2-line intro preview for each member (fetched from #intros cache) and @mentions anyone missing an intro
+- **`/timer_add [minutes]`** — Add extra minutes to the current speaker mid-presentation
 - **Shuffle option** — Randomize speaker order with `shuffle: True`
-- When all speakers finish, the bot announces "Ready to begin voting!"
+- When all speakers finish, embed updates to "Presentations Complete — Ready to begin voting!"
 
 ## Wallet System
 
@@ -204,7 +297,8 @@ When a fractal completes, the bot generates a pre-filled `zao.frapps.xyz/submitB
 
 Each voting round, the bot:
 - **Sends a link** to the voting thread in the voice channel's text chat so members can click through
-- **Plays an audio ping** by joining the voice channel, playing a short ding sound, then disconnecting
+- **Plays a level-specific sound** — Different ascending-pitch audio for each voting level (level1.mp3 through level6.mp3)
+- **Stays connected for 5 minutes** — Bot remains in voice between rounds to avoid repeated join/leave spam, with auto-disconnect after 5 minutes of inactivity
 
 ## Project Structure
 
@@ -216,7 +310,13 @@ fractalbotfeb2026/
 │   ├── config.py              # Settings (roles, levels, respect points, channels)
 │   └── .env.template          # Environment variable template
 ├── assets/
-│   └── ping.mp3               # Audio notification for voting rounds
+│   ├── ping.mp3               # Default audio notification
+│   ├── level1.mp3             # Level 1 voting sound (lowest pitch)
+│   ├── level2.mp3             # Level 2 voting sound
+│   ├── level3.mp3             # Level 3 voting sound
+│   ├── level4.mp3             # Level 4 voting sound
+│   ├── level5.mp3             # Level 5 voting sound
+│   └── level6.mp3             # Level 6 voting sound (highest pitch)
 ├── cogs/
 │   ├── base.py                # Shared utilities (voice check, role check)
 │   ├── guide.py               # /guide + /leaderboard (inline top 10)
@@ -394,6 +494,67 @@ npm run dev
 
 ### Infrastructure
 - 51 total slash commands (up from 48)
+
+## v1.4 Changelog
+
+### New Commands
+- **`/randomize`** — Split members from Fractal Waiting Room into fractal rooms (max 6 per room, evenly distributed). Supports optional `facilitator_1` through `facilitator_6` parameters to pre-assign facilitators to rooms.
+
+### Presentation Timer Overhaul
+- **4-minute default** — Changed from 3 to 4 minutes per speaker
+- **Anyone can control** — Removed facilitator-only restriction; all buttons open to everyone
+- **Interactive button layout** — I'm Done, Skip, Skip & Come Back, +1 Min, Raise Hand, Pause/Resume, Stop, Fire/Clap reactions, Pick Next dropdown
+- **Stackable emoji reactions** — Every click increments a counter (not a toggle). Live reaction bar displayed on embed.
+- **Raise Hand** — Toggle hand raise with notification sent to current speaker
+- **Skip & Come Back** — Defers current speaker to end of queue, comes back after everyone else
+- **I'm Done** — Current speaker ends their turn early
+- **Pick Next** — Select dropdown to reorder the queue and jump to any upcoming or skipped speaker
+- **Intro previews on start** — Compact 2-line intro preview per member when timer starts, with @mentions for members missing intros
+
+### Voice Channel Improvements
+- **Bot stays connected 5 minutes** — Instead of disconnecting and reconnecting each voting round, bot stays in voice for 5 minutes with auto-disconnect timer
+- **Level-specific sounds** — Different ascending-pitch audio files for each voting level (level1.mp3 through level6.mp3)
+
+### `/zaofractal` Enhancements
+- **Intro status check** — Shows wallet + intro status per member in the confirmation embed before starting
+
+### Bug Fixes
+- **Fix duplicate timer messages** — Timer command could execute twice due to HTTPException catch allowing continuation; now returns immediately on failed defer
+- **Fix multiple countdown tasks** — Advance and resume now cancel the previous countdown before starting a new one, preventing duplicate warnings and double-advances
+- **Fix Move Members permission** — Added `move_members=True` and `connect=True` to bot invite link permissions for `/randomize`
+
+### Known Issues (Audit)
+- **No duplicate prevention on `/zaofractal`** — Rapid double-click could create two fractal threads (needs lock guard)
+- **Bare `except` clauses** — Several locations in fractal cog silently swallow errors instead of logging them
+- **Uncancelled voice disconnect task** — `_voice_disconnect_task` not cancelled when fractal ends
+- **Proposal expiry race condition** — Startup catchup and hourly loop could double-process the same proposal
+- **Synchronous JSON I/O** — All data persistence uses blocking `json.load()/dump()`, could block event loop on large files
+- **No rate limiting on `/propose`** — Users can spam proposals without cooldown
+- **Proposal index embed overflow** — Could exceed Discord's 6000 char limit with many active proposals
+
+## v1.5 Changelog
+
+### Critical Bug Fix — Duplicate Command Messages
+- **Root cause identified** — Slash commands were sending 2-5x duplicate responses due to three compounding issues:
+  1. **Stale guild + global command registrations** — Commands registered both per-guild (instant) and globally caused Discord to dispatch multiple interactions per invocation
+  2. **Webhook rate limiting (429)** — `defer()` + `followup.send()` triggers Discord webhook endpoints which rate-limit and retry, each retry creating a duplicate message
+  3. **Multiple bot processes** — Accumulated zombie `main.py` processes (up to 21 found) each responded independently
+- **Fix: Global-only command sync** — On startup, bot now clears all stale guild command registrations and syncs only globally. One registration per command = one dispatch per invocation.
+- **Fix: Bot-wide interaction dedup** — Added `bot.tree.interaction_check` that tracks seen interaction IDs in an LRU cache. Blocks any duplicate dispatch before command handlers run.
+- **Fix: `on_ready` guard** — Added `_ready_fired` flag so reconnects don't re-sync commands or re-register handlers
+- **Fix: Direct response for fast paths** — Timer error responses (not in voice, already running, etc.) now use `interaction.response.send_message()` instead of `defer()` + `followup.send()`, avoiding the webhook rate-limit retry path entirely
+- **Fix: Cog-level dedup** — Added `_InteractionDedup` class in `base.py` with shared instance across all cogs, providing a second layer of duplicate protection
+
+### Timer Consolidation
+- **Single timer embed** — Timer previously sent 3 separate messages (announcement + intro previews + timer embed). Now sends 1 clean timer embed for controls/countdown.
+- **Separate "Meet Your Group" embed** — Intros are now sent as their own public embed before the timer starts, with 1-2 line previews and [read more] links to the full intro in #intros. Members without intros are @mentioned with a prompt to post one.
+- **Edit-only on advance** — Advancing to next speaker now edits the existing embed instead of sending a separate ping message
+- **Countdown task management** — `advance()` and `resume()` now cancel the previous countdown task before starting a new one, preventing stacked timers
+
+### Infrastructure
+- 52 total slash commands (up from 51)
+- Added `test_timer.py` — Minimal 2-command test bot for isolating slash command bugs
+- Comprehensive README rewrite with full meeting userflow documentation
 
 ## Roadmap / Ideas
 

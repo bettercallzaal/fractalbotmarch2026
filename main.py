@@ -35,6 +35,26 @@ intents.voice_states = True
 # Initialize bot with command prefix
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# --- Bot-wide duplicate interaction guard ---
+# discord.py can dispatch the same interaction multiple times when commands
+# exist in both global and guild trees. This catches duplicates at the
+# lowest level, before any command handler runs.
+from collections import OrderedDict
+_seen_interactions = OrderedDict()
+
+@bot.tree.interaction_check
+async def global_interaction_dedup(interaction: discord.Interaction) -> bool:
+    """Return False to block duplicate dispatches of the same interaction."""
+    cmd_name = interaction.command.name if interaction.command else "unknown"
+    logger.info(f"[DEDUP] interaction_check: id={interaction.id} command={cmd_name} guild={interaction.guild_id}")
+    if interaction.id in _seen_interactions:
+        logger.warning(f"[DEDUP] BLOCKED duplicate interaction {interaction.id}")
+        return False
+    _seen_interactions[interaction.id] = True
+    while len(_seen_interactions) > 200:
+        _seen_interactions.popitem(last=False)
+    return True
+
 # Load cogs
 async def load_extensions():
     for filename in os.listdir('./cogs'):
@@ -46,8 +66,16 @@ async def load_extensions():
     await bot.load_extension('cogs.fractal')
     logger.info("Loaded fractal extension")
 
+_ready_fired = False
+
 @bot.event
 async def on_ready():
+    global _ready_fired
+    if _ready_fired:
+        logger.info("on_ready fired again (reconnect) — skipping command sync")
+        return
+    _ready_fired = True
+
     logger.info(f"=== Bot Starting Up ===")
     logger.info(f"Bot: {bot.user.name}#{bot.user.discriminator} (ID: {bot.user.id})")
 
@@ -65,6 +93,8 @@ async def on_ready():
             create_private_threads=True,
             read_message_history=True,
             add_reactions=True,
+            move_members=True,
+            connect=True,
         ),
         scopes=["bot", "applications.commands"]
     )
@@ -75,17 +105,16 @@ async def on_ready():
     for cmd in bot.tree.get_commands():
         logger.info(f"Command: /{cmd.name} - {cmd.description}")
 
-    # Clear any existing guild commands first
+    # IMPORTANT: Clear stale guild registrations from previous syncs
+    # Without this, commands exist per-guild AND globally = multiple dispatches
     for guild in bot.guilds:
-        logger.info(f"Clearing existing commands for guild: {guild.name}")
         bot.tree.clear_commands(guild=discord.Object(id=guild.id))
+        await bot.tree.sync(guild=discord.Object(id=guild.id))
+        logger.info(f"Cleared stale guild commands from {guild.name}")
 
-    # Copy global commands to guild for faster sync
-    for guild in bot.guilds:
-        logger.info(f"Copying commands to guild: {guild.name}")
-        bot.tree.copy_global_to(guild=discord.Object(id=guild.id))
-        synced = await bot.tree.sync(guild=discord.Object(id=guild.id))
-        logger.info(f"Commands synced to guild {guild.id}: {len(synced)} commands")
+    # Single global sync — one registration per command
+    synced = await bot.tree.sync()
+    logger.info(f"Synced {len(synced)} commands globally")
 
 # Run bot
 async def main():

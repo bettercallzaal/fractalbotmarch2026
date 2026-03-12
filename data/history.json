@@ -141,6 +141,86 @@
         }
       ],
       "completed_at": "2026-02-23T23:48:04.840507"
+    },
+    {
+      "id": 5,
+      "group_name": "Fractal 90 - Group 1",
+      "facilitator_id": "214921134477541377",
+      "facilitator_name": "Zaal",
+      "fractal_number": "90",
+      "group_number": "1",
+      "guild_id": "1127115902010277989",
+      "thread_id": "1480696232832667792",
+      "rankings": [
+        {
+          "user_id": "785782556896788521",
+          "display_name": "Tic",
+          "level": 6,
+          "respect": 110
+        },
+        {
+          "user_id": "214921134477541377",
+          "display_name": "Zaal",
+          "level": 5,
+          "respect": 68
+        },
+        {
+          "user_id": "533417319133741076",
+          "display_name": "DCoop in the DMV",
+          "level": 4,
+          "respect": 42
+        }
+      ],
+      "completed_at": "2026-03-09T22:40:29.972001"
+    },
+    {
+      "id": 6,
+      "group_name": "Fractal March 9 - Group 3",
+      "facilitator_id": "511383895900553246",
+      "facilitator_name": "EZinCrypto",
+      "fractal_number": "March 9",
+      "group_number": "3",
+      "guild_id": "1127115902010277989",
+      "thread_id": "1480710264553738342",
+      "rankings": [
+        {
+          "user_id": "511383895900553246",
+          "display_name": "EZinCrypto",
+          "level": 6,
+          "respect": 110
+        },
+        {
+          "user_id": "208321561982271489",
+          "display_name": "penguin",
+          "level": 5,
+          "respect": 68
+        },
+        {
+          "user_id": "1071292017117761616",
+          "display_name": "Motomoto",
+          "level": 4,
+          "respect": 42
+        },
+        {
+          "user_id": "369284552763375617",
+          "display_name": "Joseph Goats",
+          "level": 3,
+          "respect": 26
+        },
+        {
+          "user_id": "714817142347792475",
+          "display_name": "\u20a3\u20b3\u0142\u2c60\u00d8\u20a3\u20ae\u0246\u20a6",
+          "level": 2,
+          "respect": 16
+        },
+        {
+          "user_id": "1085740614278193202",
+          "display_name": "KOSBAAR",
+          "level": 1,
+          "respect": 10
+        }
+      ],
+      "completed_at": "2026-03-09T23:35:47.353269"
     }
   ]
 }

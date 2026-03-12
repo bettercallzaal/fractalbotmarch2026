@@ -1,5 +1,5 @@
 {
-  "next_id": 19,
+  "next_id": 21,
   "proposals": {
     "1": {
       "id": "1",
@@ -9,7 +9,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475628987148537887",
       "message_id": "1475628996925587567",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "no",
@@ -24,7 +24,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1768688732127x749684598741795500/image.png",
       "project_url": "https://artizen.fund/index/p/american-season?season=6",
-      "created_at": "2026-02-23T23:02:49.008191"
+      "created_at": "2026-02-23T23:02:49.008191",
+      "closed_at": "2026-03-09T21:17:48.966299"
     },
     "2": {
       "id": "2",
@@ -34,7 +35,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475797963317051394",
       "message_id": "1475797965510541412",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "yes",
@@ -49,7 +50,8 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": null,
-      "created_at": "2026-02-24T10:14:14.218935"
+      "created_at": "2026-02-24T10:14:14.218935",
+      "closed_at": "2026-03-09T21:17:49.939848"
     },
     "3": {
       "id": "3",
@@ -59,7 +61,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475798063040827455",
       "message_id": "1475798065293168785",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "yes",
@@ -74,7 +76,8 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": null,
-      "created_at": "2026-02-24T10:14:37.984650"
+      "created_at": "2026-02-24T10:14:37.984650",
+      "closed_at": "2026-03-09T21:17:50.619313"
     },
     "4": {
       "id": "4",
@@ -84,7 +87,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475798223510569043",
       "message_id": "1475798225557655697",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "yes",
@@ -99,7 +102,8 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": null,
-      "created_at": "2026-02-24T10:15:16.206989"
+      "created_at": "2026-02-24T10:15:16.206989",
+      "closed_at": "2026-03-09T21:17:51.939604"
     },
     "5": {
       "id": "5",
@@ -109,7 +113,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475798498413908029",
       "message_id": "1475798500078780547",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "no",
@@ -124,7 +128,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771546210672x362600562215049700/image.png",
       "project_url": "https://artizen.fund/index/p/femstage?season=6",
-      "created_at": "2026-02-24T10:16:21.530885"
+      "created_at": "2026-02-24T10:16:21.530885",
+      "closed_at": "2026-03-09T21:17:52.348463"
     },
     "6": {
       "id": "6",
@@ -134,7 +139,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799112703021158",
       "message_id": "1475799113852387381",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "no",
@@ -149,7 +154,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1768823933781x346741307713669400/image.png",
       "project_url": "https://artizen.fund/index/p/labour-union-of-higher-dimensional-shapeshifters",
-      "created_at": "2026-02-24T10:18:47.959227"
+      "created_at": "2026-02-24T10:18:47.959227",
+      "closed_at": "2026-03-09T21:17:53.506104"
     },
     "7": {
       "id": "7",
@@ -159,7 +165,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799207330975817",
       "message_id": "1475799209021276181",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "no",
@@ -174,7 +180,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771529481300x388031783883498560/image.png",
       "project_url": "https://artizen.fund/index/p/akiya-collective",
-      "created_at": "2026-02-24T10:19:10.560544"
+      "created_at": "2026-02-24T10:19:10.560544",
+      "closed_at": "2026-03-09T21:17:54.859441"
     },
     "8": {
       "id": "8",
@@ -184,7 +191,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799331922772062",
       "message_id": "1475799341162565707",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "no",
@@ -195,7 +202,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771263434107x675532989217316700/image.png",
       "project_url": "https://artizen.fund/index/p/dreamstarterxyz?season=6",
-      "created_at": "2026-02-24T10:19:42.127663"
+      "created_at": "2026-02-24T10:19:42.127663",
+      "closed_at": "2026-03-09T21:17:55.633455"
     },
     "9": {
       "id": "9",
@@ -205,7 +213,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799533790298173",
       "message_id": "1475799535178743831",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "no",
@@ -220,7 +228,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1770306875476x766538459842019700/Profundo%20Artizen.JPG",
       "project_url": "https://artizen.fund/index/p/profundo---cuerpo-agua-y-territorio",
-      "created_at": "2026-02-24T10:20:28.392768"
+      "created_at": "2026-02-24T10:20:28.392768",
+      "closed_at": "2026-03-09T21:17:56.266447"
     },
     "10": {
       "id": "10",
@@ -230,7 +239,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799694922743899",
       "message_id": "1475799696877551678",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "yes",
@@ -245,7 +254,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1769744665118x355255540685235600/image.png",
       "project_url": "https://artizen.fund/index/p/the-participatory-spatial-music-lab",
-      "created_at": "2026-02-24T10:21:06.895790"
+      "created_at": "2026-02-24T10:21:06.895790",
+      "closed_at": "2026-03-09T21:17:56.873734"
     },
     "11": {
       "id": "11",
@@ -255,7 +265,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799777647001632",
       "message_id": "1475799781191319674",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "yes",
@@ -270,7 +280,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771383929073x469494449857075900/image.png",
       "project_url": "https://artizen.fund/index/p/entertainment-evolved",
-      "created_at": "2026-02-24T10:21:27.018462"
+      "created_at": "2026-02-24T10:21:27.018462",
+      "closed_at": "2026-03-09T21:17:57.497508"
     },
     "12": {
       "id": "12",
@@ -280,7 +291,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799845087477922",
       "message_id": "1475799847125909584",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "yes",
@@ -295,7 +306,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1770948176730x408394026390636740/image.png",
       "project_url": "https://artizen.fund/index/p/cinemetropolis",
-      "created_at": "2026-02-24T10:21:42.761791"
+      "created_at": "2026-02-24T10:21:42.761791",
+      "closed_at": "2026-03-09T21:17:58.083882"
     },
     "13": {
       "id": "13",
@@ -305,7 +317,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1475799933771710546",
       "message_id": "1475799935508283525",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "no",
@@ -316,7 +328,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1771076629168x683549920698143300/image.png",
       "project_url": "https://artizen.fund/index/p/akuya?season=6",
-      "created_at": "2026-02-24T10:22:03.771298"
+      "created_at": "2026-02-24T10:22:03.771298",
+      "closed_at": "2026-03-09T21:17:59.486259"
     },
     "14": {
       "id": "14",
@@ -326,7 +339,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1476164929735233608",
       "message_id": "1476164931702226944",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "yes",
@@ -341,7 +354,8 @@
       "funding_amount": null,
       "image_url": "https://b52a6191a6a50af956eb089c76ac973d.cdn.bubble.io/cdn-cgi/image/w=,h=,f=auto,dpr=1,fit=contain/f1740620603745x933623247418640200/image.png",
       "project_url": "https://artizen.fund/index/p/impact-concerts",
-      "created_at": "2026-02-25T10:32:25.630691"
+      "created_at": "2026-02-25T10:32:25.630691",
+      "closed_at": "2026-03-09T21:17:59.921857"
     },
     "15": {
       "id": "15",
@@ -351,7 +365,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1476266541711495272",
       "message_id": "1476266543620034581",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "yes",
@@ -366,7 +380,8 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": "https://artizen.fund/index/p/heritage-collection?season=6",
-      "created_at": "2026-02-25T17:16:11.821937"
+      "created_at": "2026-02-25T17:16:11.821937",
+      "closed_at": "2026-03-09T21:18:00.751728"
     },
     "16": {
       "id": "16",
@@ -376,7 +391,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1476266965181006020",
       "message_id": "1476266967793926226",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "yes",
@@ -391,7 +406,8 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": "https://artizen.fund/index/p/ecoes-of-freedom",
-      "created_at": "2026-02-25T17:17:52.968771"
+      "created_at": "2026-02-25T17:17:52.968771",
+      "closed_at": "2026-03-09T21:18:01.231576"
     },
     "17": {
       "id": "17",
@@ -401,7 +417,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1476731643195691008",
       "message_id": "1476731645565341716",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "yes",
@@ -412,7 +428,8 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": "https://artizen.fund/index/p/the-new-vanguard?season=6",
-      "created_at": "2026-02-27T00:04:20.751588"
+      "created_at": "2026-02-27T00:04:20.751588",
+      "closed_at": "2026-03-09T21:18:01.763931"
     },
     "18": {
       "id": "18",
@@ -422,7 +439,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1476732011929665649",
       "message_id": "1476732012663406626",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "1211821614753390622": {
           "value": "yes",
@@ -433,7 +450,45 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": "https://artizen.fund/index/p/the-art-factory",
-      "created_at": "2026-02-27T00:05:48.368460"
+      "created_at": "2026-02-27T00:05:48.368460",
+      "closed_at": "2026-03-09T21:18:02.245185"
+    },
+    "19": {
+      "id": "19",
+      "title": "Curate: Dark Rooms  Immersive Experience",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Dark Rooms  Immersive Experience\n**Link:** [View Project](https://artizen.fund/index/p/dark-rooms--immersive-experience)\n\nDark Rooms is a creator-owned immersive storytelling project developed by an independent collective of artists, technologists, and producers working across Copenhagen, Berlin, and Taipei. The project merges moving image, spatial storytelling, and immersive technology to create a multi-user VR installation exploring intimacy, vulnerability, and healing.  Emerging technology is used intentionally and in service of emotional depth. Multi-user VR, real-time gesture tracking, and AI-assisted interaction allow participants to move, respond, and shape narrative space together. The technology enables embodied presence rather than passive viewing.  Collaboration is fundamental to the project. Stories are developed through workshops and co-creation processes with contributors whose lived experiences shape the narrative environments. The project follows the principle \u201cnothing about us without us,\u201d ensuring participants influence the creative structure rather than serving as extracted source material.  The production framework prioritizes fair collaboration and transparent practices. Contributors are compensated for their work and credited appropriately, reflecting a commitment to non-extractive cultural production.  Dark Rooms is also built publicly through iterative development. Workshops, prototypes, and touring installations generate documentation and shared learning that are openly communicated with the wider creative community.  The project culminates in a real-world activation: a touring location-based installation presented at festivals, cultural institutions, and partner venues internationally. Audiences enter a shared immersive environment where narrative unfolds through movement and interaction, transforming spectators into participants.  By combining immersive technology, collective authorship, and public exhibition, Dark Rooms aligns closely with ZAO\u2019s vision of collaborative, creator-owned cultural production.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1481360489593176086",
+      "message_id": "1481360491614834892",
+      "status": "active",
+      "votes": {},
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/dark-rooms--immersive-experience",
+      "created_at": "2026-03-11T18:37:44.064787"
+    },
+    "20": {
+      "id": "20",
+      "title": "Curate: Memethology",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Memethology\n**Link:** [View Project](https://artizen.fund/index/p/memethology)\n\nMemethology meets all six of ZAO's eligibility requirements: Creator-owned and independently operated \u2713 \u2014 Memethology Inc., fully founder-controlled. Integrates emerging technology meaningfully \u2713 \u2014 blockchain artifacts (minted on Ethereum), AI-powered card creation pipeline, on-chain coordination. Active community participation \u2713 \u2014 100+ active Telegram members, 1K Substack subscribers, global player community across 4 continents. Builds in public \u2713 \u2014 Substack documents the project openly; card drops are shared publicly with narrative context. Non-extractive framework \u2713 \u2014 Artizen's transparent matching model; no extractive intermediaries. Public-facing real-world activation \u2713 \u2014 ETHDenver 2026 (every attendee received a booster pack); Prev: Devcon partnerships (twice), Edge City collaboration, Featured on Bankless. Memethology is a trading card game documenting real moments at the frontier of technology \u2014 AI, crypto, longevity \u2014 as MTG-quality collectible cultural artifacts. Founder Colton Orr (Spider-Man PS4/PS5 at Insomniac Games; Creative Director at Gitcoin, $500K raised for open-source funding). 400+ cards. 4 continents. Tens of thousands in circulation.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1481360804371759282",
+      "message_id": "1481360805948555426",
+      "status": "active",
+      "votes": {
+        "214921134477541377": {
+          "value": "yes",
+          "weight": 3442.0
+        }
+      },
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/memethology",
+      "created_at": "2026-03-11T18:38:58.551421"
     }
   },
   "_index_message_id": "1475629008933880055"
