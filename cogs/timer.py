@@ -1,3 +1,31 @@
+"""Presentation timer system for ZAO Fractal meetings.
+
+This module implements a timed speaking queue used during fractal group
+presentations. Before a fractal group votes on contributions, each member
+presents their work. The timer enforces equal speaking time, provides
+countdown warnings, and offers interactive controls (reactions, hand-raising,
+skip/defer) via Discord UI components.
+
+Architecture:
+    - PresentationTimer: Core state machine that tracks the speaker queue,
+      countdown, reactions, and raised hands. One instance per active session.
+    - TimerControlView: Discord UI view (buttons + select menu) that delegates
+      user interactions back to the PresentationTimer instance.
+    - TimerCog: The discord.py cog that registers slash commands (/timer,
+      /timer_add) and manages active timer instances per channel.
+
+Flow:
+    1. A user in a voice channel invokes /timer.
+    2. The cog pulls voice channel members, optionally shuffles them, and
+       creates a PresentationTimer.
+    3. An intro preview embed is sent (pulled from the IntroCog cache),
+       followed by the live timer embed with interactive buttons.
+    4. The countdown loop sleeps efficiently (jumping between warning
+       milestones rather than polling every second) and auto-advances
+       speakers when time expires.
+    5. When all speakers finish, the timer announces readiness for voting.
+"""
+
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -9,7 +37,26 @@ from config.config import INTROS_CHANNEL_ID
 
 
 class PresentationTimer:
-    """Manages a speaking queue with countdown timer for a channel"""
+    """Core state machine for a single presentation timer session.
+
+    Manages an ordered queue of speakers, each given a fixed time window.
+    Speakers can be skipped, deferred (come back later), or reordered
+    mid-session. The timer edits a single Discord embed message in-place
+    to reflect the current state, avoiding message spam.
+
+    Attributes:
+        channel: The text channel where the timer embed lives.
+        speakers: Ordered list of members who will present.
+        minutes: Duration each speaker gets.
+        facilitator: The member who started the timer.
+        current_index: Position in the speakers list (0-based).
+        paused: Whether the countdown is currently paused.
+        stopped: Whether the session was manually stopped.
+        message: The live-updating Discord embed message.
+        skipped: Members who deferred their turn to present later.
+        reactions: Stackable emoji counters (audience feedback).
+        raised_hands: Members who signalled they have a question.
+    """
 
     def __init__(self, channel: discord.abc.Messageable, speakers: list[discord.Member],
                  minutes: int, facilitator: discord.Member):
@@ -21,12 +68,15 @@ class PresentationTimer:
         self.paused = False
         self.stopped = False
         self.message: discord.Message | None = None
+        # Unix timestamp when the current speaker's time expires
         self.end_timestamp: int = 0
         self.skipped: list[discord.Member] = []  # Members deferred to come back later
         self._countdown_task: asyncio.Task | None = None  # Track active countdown
         self.logger = logging.getLogger('bot')
 
-        # Interactive features - reactions are counters, users can stack
+        # Interactive reactions — unlike Discord's native reactions, these are
+        # simple counters that stack: every button click increments the count,
+        # so one user can contribute multiple times.
         self.reactions: dict[str, int] = {
             "\U0001f525": 0,   # fire
             "\U0001f44f": 0,   # clap
@@ -34,21 +84,28 @@ class PresentationTimer:
             "\u2753": 0,       # question mark
         }
         self.raised_hands: list[discord.Member] = []
+        # Warning flags prevent duplicate warning messages within a single turn
         self._warned_60 = False
         self._warned_30 = False
 
     @property
     def current_speaker(self) -> discord.Member | None:
+        """Return the member currently presenting, or None if index is out of bounds."""
         if 0 <= self.current_index < len(self.speakers):
             return self.speakers[self.current_index]
         return None
 
     @property
     def is_done(self) -> bool:
+        """True when all speakers (including deferred ones) have finished, or timer was stopped."""
         return (self.current_index >= len(self.speakers) and not self.skipped) or self.stopped
 
     def _reset_round_state(self):
-        """Reset per-speaker state when advancing"""
+        """Reset per-speaker state when advancing to the next speaker.
+
+        Clears reaction counts, raised hands, and warning flags so each
+        speaker starts with a clean slate.
+        """
         for key in self.reactions:
             self.reactions[key] = 0
         self.raised_hands = []
@@ -56,7 +113,10 @@ class PresentationTimer:
         self._warned_30 = False
 
     def _reaction_bar(self) -> str:
-        """Build a compact reaction summary string"""
+        """Build a compact string summarizing current reaction counts.
+
+        Returns something like "fire 3  clap 5" or "No reactions yet" if all zero.
+        """
         parts = []
         for emoji, count in self.reactions.items():
             if count > 0:
@@ -64,8 +124,18 @@ class PresentationTimer:
         return "  ".join(parts) if parts else "No reactions yet"
 
     def _build_embed(self, status: str = "speaking") -> discord.Embed:
+        """Construct the Discord embed reflecting current timer state.
+
+        Args:
+            status: One of "speaking", "paused", "warning", or "done".
+                    Controls the embed's title, color, and displayed fields.
+
+        Returns:
+            A discord.Embed ready to be sent or used in a message edit.
+        """
         speaker = self.current_speaker
 
+        # Terminal state: all speakers finished
         if status == "done":
             embed = discord.Embed(
                 title="\u2705 Presentations Complete",
@@ -91,20 +161,22 @@ class PresentationTimer:
             embed = discord.Embed(
                 title=f"\u23f0 {speaker.display_name} - Time Running Out!",
                 description=f"{speaker.mention} has the floor.",
-                color=0xED4245  # Red
+                color=0xED4245  # Red — urgency color
             )
             embed.add_field(
                 name="Time Remaining",
+                # Discord's <t:UNIX:R> renders as a live relative timestamp on the client
                 value=f"**{mins}:{secs:02d}**  (ends <t:{self.end_timestamp}:R>)",
                 inline=True
             )
         else:
+            # Normal "speaking" state
             remaining = max(0, self.end_timestamp - int(time.time()))
             mins, secs = divmod(remaining, 60)
             embed = discord.Embed(
                 title=f"\U0001f399\ufe0f Now Presenting: {speaker.display_name}",
                 description=f"{speaker.mention}, you're up! You have **{self.minutes} minutes**.",
-                color=0x5865F2  # Blue
+                color=0x5865F2  # Blue — default brand color
             )
             embed.add_field(
                 name="Time Remaining",
@@ -112,6 +184,7 @@ class PresentationTimer:
                 inline=True
             )
 
+        # Speaker progress indicator (includes deferred speakers in total count)
         embed.add_field(
             name="Speaker",
             value=f"{self.current_index + 1} of {len(self.speakers) + len(self.skipped)}",
@@ -130,7 +203,7 @@ class PresentationTimer:
             inline=False
         )
 
-        # Raised hands
+        # Raised hands — shown only when someone has raised their hand
         if self.raised_hands:
             hand_names = ", ".join(f"**{m.display_name}**" for m in self.raised_hands)
             embed.add_field(
@@ -139,7 +212,9 @@ class PresentationTimer:
                 inline=False
             )
 
-        # Queue
+        # Speaker queue with visual status indicators:
+        #   checkmark = already presented, speech bubble = current, hourglass = upcoming,
+        #   arrows = deferred (will come back)
         queue_lines = []
         for i, s in enumerate(self.speakers):
             if i < self.current_index:
@@ -157,25 +232,38 @@ class PresentationTimer:
         return embed
 
     async def _update_message(self, status: str = "speaking", content: str = None):
-        """Helper to update the timer message with current state"""
+        """Edit the live timer message with the current state.
+
+        If the original message was deleted (NotFound), re-sends a new one
+        to keep the timer visible.
+        """
         embed = self._build_embed(status)
         view = TimerControlView(self)
         if self.message:
             try:
                 await self.message.edit(embed=embed, view=view, content=content)
             except discord.NotFound:
+                # Message was deleted — recover by sending a fresh one
                 self.message = await self.channel.send(
                     content=content, embed=embed, view=view
                 )
 
     def _start_countdown(self):
-        """Cancel any existing countdown and start a new one"""
+        """Cancel any existing countdown task and start a fresh one.
+
+        This prevents overlapping countdowns when resuming or advancing
+        speakers — each speaker gets exactly one active countdown task.
+        """
         if self._countdown_task and not self._countdown_task.done():
             self._countdown_task.cancel()
         self._countdown_task = asyncio.create_task(self._countdown())
 
     async def start(self):
-        """Start the presentation timer from the first speaker — sends one message"""
+        """Begin the presentation session by sending the initial timer embed.
+
+        This is called once when /timer is invoked. It sends the first
+        embed message and kicks off the countdown for the first speaker.
+        """
         self.end_timestamp = int(time.time()) + (self.minutes * 60)
         embed = self._build_embed("speaking")
         view = TimerControlView(self)
@@ -183,10 +271,18 @@ class PresentationTimer:
         self._start_countdown()
 
     async def _countdown(self):
-        """Wait for the timer to expire, then advance. Posts time warnings."""
+        """Background loop that waits for timer expiry and posts warnings.
+
+        Instead of polling every second, this sleeps in large jumps between
+        warning milestones (full duration -> 60s mark -> 30s mark -> expiry).
+        This reduces unnecessary wake-ups and API calls while still hitting
+        the warning thresholds accurately.
+        """
         while not self.is_done:
             remaining = self.end_timestamp - int(time.time())
 
+            # While paused, just idle — end_timestamp is stale but will be
+            # recalculated on resume()
             if self.paused:
                 await asyncio.sleep(1)
                 continue
@@ -195,13 +291,14 @@ class PresentationTimer:
                 await self.advance()
                 return
 
-            # Time warnings — only update embed at these milestones
+            # Time warnings — update the embed color/title and send ephemeral alerts
             if remaining <= 60 and not self._warned_60:
                 self._warned_60 = True
                 await self._update_message("warning")
                 warn = await self.channel.send(
                     f"\u23f0 {self.current_speaker.mention}, **1 minute remaining!**"
                 )
+                # Auto-delete warning to reduce clutter
                 asyncio.create_task(self._delete_after(warn, 10))
 
             if remaining <= 30 and not self._warned_30:
@@ -212,16 +309,22 @@ class PresentationTimer:
                 )
                 asyncio.create_task(self._delete_after(warn, 10))
 
-            # Sleep until next milestone or expiry — no periodic tick updates
+            # Sleep until the next milestone rather than polling every second.
+            # This is the key efficiency optimization: at most 3 wake-ups per speaker.
             if remaining > 60:
                 await asyncio.sleep(remaining - 60)
             elif remaining > 30:
                 await asyncio.sleep(remaining - 30)
             else:
+                # In the final 30 seconds, check more frequently in case of
+                # pause/resume or time additions that shift the deadline
                 await asyncio.sleep(min(remaining, 5))
 
     async def _delete_after(self, message: discord.Message, seconds: int):
-        """Delete a message after a delay"""
+        """Delete a transient notification message after a delay.
+
+        Silently ignores NotFound errors (message already deleted).
+        """
         await asyncio.sleep(seconds)
         try:
             await message.delete()
@@ -229,29 +332,43 @@ class PresentationTimer:
             pass
 
     async def add_reaction(self, emoji: str, user_id: int):
-        """Stack a reaction - every click adds one more"""
+        """Increment a reaction counter and refresh the embed.
+
+        Unlike Discord's native reactions, these stack: every click adds +1,
+        allowing users to express enthusiasm by clicking multiple times.
+        """
         if emoji in self.reactions:
             self.reactions[emoji] += 1
+            # Preserve the warning-state embed color if we're in the final minute
             remaining = self.end_timestamp - int(time.time())
             status = "warning" if self._warned_60 and remaining <= 60 else "speaking"
             await self._update_message(status)
 
     async def raise_hand(self, member: discord.Member):
-        """Toggle raise hand for a member"""
+        """Toggle hand-raise for a member and notify the current speaker.
+
+        Raising a hand adds the member to the list and sends a brief
+        notification. Clicking again lowers the hand (removes from list).
+        """
         if member in self.raised_hands:
             self.raised_hands.remove(member)
             await self._update_message()
         else:
             self.raised_hands.append(member)
             await self._update_message()
-            # Notify the speaker
+            # Notify the speaker so they see it even if not watching the embed
             notify = await self.channel.send(
                 f"\u270b **{member.display_name}** has a question for {self.current_speaker.mention}!"
             )
             asyncio.create_task(self._delete_after(notify, 8))
 
     async def im_done(self, member: discord.Member):
-        """Current speaker ends their turn early"""
+        """Allow the current speaker to end their turn early.
+
+        Returns False if someone other than the current speaker tries to
+        use this, allowing the caller to show an error. Returns True on
+        success, None if the timer is already done.
+        """
         if self.is_done:
             return
         if member.id != self.current_speaker.id:
@@ -264,9 +381,14 @@ class PresentationTimer:
         return True
 
     async def add_time(self, minutes: int = 1):
-        """Add time to current speaker"""
+        """Extend the current speaker's remaining time.
+
+        Also resets warning flags if the new remaining time is above the
+        warning thresholds, so warnings re-trigger at the correct moment.
+        """
         self.end_timestamp += minutes * 60
-        # Reset warning flags if we went back above thresholds
+        # Reset warning flags if added time pushed us back above thresholds,
+        # so the warnings fire again at the correct remaining time
         remaining = self.end_timestamp - int(time.time())
         if remaining > 60:
             self._warned_60 = False
@@ -276,7 +398,11 @@ class PresentationTimer:
         await self._update_message()
 
     async def skip_come_back(self):
-        """Skip current speaker and add them to the end to come back later"""
+        """Defer the current speaker to present later.
+
+        Moves them to the skipped list. They'll be re-inserted into the
+        speakers list after all originally-queued speakers finish.
+        """
         if self.is_done:
             return
         speaker = self.current_speaker
@@ -285,18 +411,25 @@ class PresentationTimer:
         await self.advance()
 
     async def pick_next(self, member: discord.Member):
-        """Jump to a specific member next, reordering the queue"""
+        """Reorder the queue so a specific member presents next.
+
+        Handles two cases:
+        - Member is in the skipped list: pull them out and insert at next position.
+        - Member is in the upcoming queue: move them to the next position.
+        In both cases, immediately advances to start their turn.
+        """
         if self.is_done:
             return
 
-        # Check if member is in the skipped list
+        # Check if member is in the skipped (deferred) list first
         if member in self.skipped:
             self.skipped.remove(member)
+            # Insert right after current speaker so advance() picks them up
             self.speakers.insert(self.current_index + 1, member)
             await self.advance()
             return
 
-        # Check if member is in the upcoming speakers
+        # Check if member is in the upcoming (not yet presented) speakers
         upcoming_indices = [i for i, s in enumerate(self.speakers) if i > self.current_index and s.id == member.id]
         if upcoming_indices:
             idx = upcoming_indices[0]
@@ -305,20 +438,27 @@ class PresentationTimer:
             await self.advance()
 
     async def advance(self):
-        """Move to the next speaker"""
+        """Move to the next speaker in the queue.
+
+        When the main queue is exhausted, pulls deferred speakers back in.
+        When everyone has presented, posts a completion message and stops.
+        """
         if self.stopped:
             return
 
         self._reset_round_state()
         self.current_index += 1
 
+        # If we've gone past the end of the speakers list, check for deferred speakers
         if self.current_index >= len(self.speakers):
             if self.skipped:
+                # Re-append the first deferred speaker so the index is valid again
                 comeback = self.skipped.pop(0)
                 self.speakers.append(comeback)
             else:
+                # All speakers done — show completion embed and stop
                 embed = self._build_embed("done")
-                view = discord.ui.View()
+                view = discord.ui.View()  # Empty view removes all buttons
                 if self.message:
                     try:
                         await self.message.edit(embed=embed, view=view, content=None)
@@ -332,35 +472,50 @@ class PresentationTimer:
         self.end_timestamp = int(time.time()) + (self.minutes * 60)
         self.paused = False
 
+        # Ping the next speaker with a content message (appears as notification)
         content = f"\U0001f399\ufe0f {self.current_speaker.mention}, you're up! You have **{self.minutes} minutes**."
         await self._update_message("speaking", content)
 
         self._start_countdown()
 
     async def pause(self):
-        """Pause the timer"""
+        """Pause the countdown, freezing the remaining time.
+
+        Captures how much time was left so resume() can set a fresh
+        end_timestamp relative to the current moment.
+        """
         if self.paused or self.is_done:
             return
         self.paused = True
+        # Store remaining seconds so we can restore them on resume
         self._remaining_when_paused = max(0, self.end_timestamp - int(time.time()))
         await self._update_message("paused")
 
     async def resume(self):
-        """Resume the timer"""
+        """Resume a paused countdown from where it left off.
+
+        Recalculates end_timestamp based on the time that was remaining
+        when pause() was called, then restarts the countdown task.
+        """
         if not self.paused or self.is_done:
             return
         self.paused = False
+        # Set a fresh deadline based on stored remaining time
         self.end_timestamp = int(time.time()) + self._remaining_when_paused
         await self._update_message("speaking",
             content=f"\U0001f399\ufe0f {self.current_speaker.mention} has the floor.")
         self._start_countdown()
 
     async def skip(self):
-        """Skip to next speaker"""
+        """Skip the current speaker without deferring them (they don't come back)."""
         await self.advance()
 
     async def stop(self):
-        """Stop the timer entirely"""
+        """Terminate the entire timer session immediately.
+
+        Cancels the countdown task and replaces the embed with a
+        stopped-state summary showing how many speakers presented.
+        """
         self.stopped = True
         if self._countdown_task and not self._countdown_task.done():
             self._countdown_task.cancel()
@@ -378,30 +533,38 @@ class PresentationTimer:
 
 
 class TimerControlView(discord.ui.View):
-    """Interactive buttons for controlling the presentation timer - anyone can use.
+    """Interactive button/select UI for controlling the presentation timer.
 
-    Layout (5 rows max in Discord):
-      Row 0: I'm Done | Skip | Skip & Come Back | +1 Min | Raise Hand
-      Row 1: Pause/Resume | Stop | Fire | Clap | Big Brain
-      Row 2: Pick who goes next... (select menu)
+    Any participant can use these controls (not just the facilitator).
+    Discord limits views to 5 rows of components, laid out as:
+
+        Row 0: I'm Done | Skip | Skip & Come Back | +1 Min | Raise Hand
+        Row 1: Pause/Resume | Stop | Fire | Clap | Big Brain
+        Row 2: Pick who goes next... (select menu, built dynamically)
+
+    The Pause and Resume buttons are mutually exclusive — only one is
+    shown depending on the timer's paused state.
     """
 
     def __init__(self, timer: PresentationTimer):
+        # timeout=None keeps the view alive indefinitely (outlives the bot's
+        # default 180-second view timeout)
         super().__init__(timeout=None)
         self.timer = timer
 
-        # Swap pause/resume based on state
+        # Show only the relevant button: Pause when running, Resume when paused
         if timer.paused:
             self.remove_item(self.pause_btn)
         else:
             self.remove_item(self.resume_btn)
 
-        # Add "Pick Next" select menu with upcoming speakers + skipped (row 2)
+        # Dynamically build a select menu with upcoming + deferred speakers.
+        # This lets the facilitator reorder who goes next on the fly.
         upcoming = [s for i, s in enumerate(timer.speakers) if i > timer.current_index]
         pickable = upcoming + timer.skipped
         if pickable:
             options = []
-            seen = set()
+            seen = set()  # Deduplicate in case a member appears in both lists
             for s in pickable:
                 if s.id not in seen:
                     label = s.display_name
@@ -412,7 +575,7 @@ class TimerControlView(discord.ui.View):
             if options:
                 select = discord.ui.Select(
                     placeholder="Pick who goes next...",
-                    options=options[:25],
+                    options=options[:25],  # Discord caps select menus at 25 options
                     custom_id="pick_next_select",
                     row=2
                 )
@@ -420,11 +583,13 @@ class TimerControlView(discord.ui.View):
                 self.add_item(select)
 
     async def _pick_next_callback(self, interaction: discord.Interaction):
+        """Handle selection from the 'pick next' dropdown menu."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
             return
         member_id = int(interaction.data['values'][0])
+        # Resolve the member object from either the speakers or skipped list
         member = None
         for s in self.timer.speakers + self.timer.skipped:
             if s.id == member_id:
@@ -433,11 +598,14 @@ class TimerControlView(discord.ui.View):
         if member:
             await self.timer.pick_next(member)
 
-    # Row 0: Speaker controls
+    # --- Row 0: Speaker controls ---
+
     @discord.ui.button(label="I'm Done", style=discord.ButtonStyle.success, emoji="\u2705", row=0)
     async def im_done_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Let the current speaker voluntarily end their turn early."""
         result = await self.timer.im_done(interaction.user)
         if result is False:
+            # Only the active speaker can use this button
             try:
                 await interaction.response.send_message(
                     "Only the current speaker can end their turn.", ephemeral=True
@@ -452,6 +620,7 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(label="Skip", style=discord.ButtonStyle.primary, emoji="\u23ed\ufe0f", row=0)
     async def skip_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Skip the current speaker permanently (they don't come back)."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -460,6 +629,7 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(label="Come Back", style=discord.ButtonStyle.secondary, emoji="\U0001f504", row=0)
     async def skip_come_back_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Defer the current speaker to present after everyone else."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -468,6 +638,7 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(label="+1 Min", style=discord.ButtonStyle.secondary, emoji="\u23f0", row=0)
     async def add_time_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Add one extra minute to the current speaker's time."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -476,15 +647,18 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(label="Hand", style=discord.ButtonStyle.primary, emoji="\u270b", row=0)
     async def raise_hand_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Toggle hand-raise to signal a question for the speaker."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
             return
         await self.timer.raise_hand(interaction.user)
 
-    # Row 1: Timer controls + reactions
+    # --- Row 1: Timer controls + audience reactions ---
+
     @discord.ui.button(label="Pause", style=discord.ButtonStyle.secondary, emoji="\u23f8\ufe0f", row=1)
     async def pause_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Pause the countdown timer."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -493,6 +667,7 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(label="Resume", style=discord.ButtonStyle.success, emoji="\u25b6\ufe0f", row=1)
     async def resume_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Resume the countdown timer from where it was paused."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -501,6 +676,7 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, emoji="\u23f9\ufe0f", row=1)
     async def stop_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Stop the entire presentation session."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -509,6 +685,7 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(style=discord.ButtonStyle.secondary, emoji="\U0001f525", row=1)
     async def react_fire(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Add a fire reaction to the current speaker's tally."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -517,6 +694,7 @@ class TimerControlView(discord.ui.View):
 
     @discord.ui.button(style=discord.ButtonStyle.secondary, emoji="\U0001f44f", row=1)
     async def react_clap(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Add a clap reaction to the current speaker's tally."""
         try:
             await interaction.response.defer()
         except (discord.NotFound, discord.HTTPException):
@@ -525,11 +703,17 @@ class TimerControlView(discord.ui.View):
 
 
 class TimerCog(BaseCog):
-    """Cog for managing presentation timers before fractal voting"""
+    """Discord cog that registers slash commands for the presentation timer.
+
+    Manages active timer instances per channel. Only one timer can run in
+    a channel at a time. The /timer command also integrates with IntroCog
+    to display member introductions before presentations begin.
+    """
 
     def __init__(self, bot):
         super().__init__(bot)
-        self.active_timers = {}  # channel_id -> PresentationTimer
+        # Map of channel_id -> PresentationTimer for active sessions
+        self.active_timers = {}
 
     @app_commands.command(
         name="timer",
@@ -541,13 +725,19 @@ class TimerCog(BaseCog):
     )
     async def timer(self, interaction: discord.Interaction, minutes: int = 4,
                     shuffle: bool = False):
-        """Start a presentation timer"""
+        """Start a presentation timer for all members in the invoker's voice channel.
+
+        Validates the user is in a voice channel, checks no timer is already
+        running, then builds an intro preview embed and starts the timer.
+        Uses a defer pattern: fast validation is done with direct responses,
+        slow work (intro lookup, embed building) happens after deferring.
+        """
         self.logger.info(f"[TIMER] handler called: interaction={interaction.id} user={interaction.user}")
         if self.is_duplicate_interaction(interaction):
             self.logger.warning(f"[TIMER] BLOCKED by BaseCog dedup: {interaction.id}")
             return
 
-        # --- Fast validation (direct response, no webhook) ---
+        # --- Fast validation (direct response, no defer needed) ---
         voice_check = await self.check_voice_state(interaction.user)
         if not voice_check['success']:
             await interaction.response.send_message(voice_check['message'], ephemeral=True)
@@ -567,7 +757,7 @@ class TimerCog(BaseCog):
             )
             return
 
-        # --- Slow path: defer, then do work ---
+        # --- Slow path: defer first, then do potentially slow I/O ---
         await interaction.response.defer(ephemeral=True)
 
         members = voice_check['members']
@@ -583,7 +773,8 @@ class TimerCog(BaseCog):
         )
         self.active_timers[channel.id] = timer
 
-        # Build and send intro previews as a separate public message
+        # Fetch and display intro previews from IntroCog's cache.
+        # This gives participants context about each speaker before presentations.
         intro_cog = self.bot.get_cog('IntroCog')
         if intro_cog:
             try:
@@ -594,6 +785,9 @@ class TimerCog(BaseCog):
                 for member in members:
                     intro_data = intro_cache.get(member.id)
                     if not intro_data:
+                        # Cache miss — fall back to scanning the intros channel history.
+                        # This is slow but only happens once per member; subsequent
+                        # lookups will hit the cache.
                         intros_channel = self.bot.get_channel(INTROS_CHANNEL_ID)
                         if intros_channel:
                             async for message in intros_channel.history(limit=None, oldest_first=True):
@@ -607,12 +801,11 @@ class TimerCog(BaseCog):
                     if not intro_data:
                         no_intro.append(member)
                         continue
-                    # 1-2 line preview
+                    # Truncate to a 1-2 line preview with a link to the full intro
                     text_lines = intro_data['text'].strip().split('\n')
                     preview = ' '.join(text_lines[:2]).strip()
                     if len(preview) > 150:
                         preview = preview[:147] + "..."
-                    # Link to full intro message
                     msg_id = intro_data.get('message_id')
                     if msg_id:
                         link = f"https://discord.com/channels/{guild_id}/{INTROS_CHANNEL_ID}/{msg_id}"
@@ -620,7 +813,7 @@ class TimerCog(BaseCog):
                     else:
                         intro_lines.append(f"\u2022 **{member.display_name}** \u2014 {preview}")
 
-                # Send intros as a public embed in the channel
+                # Send intros as a public embed before the timer starts
                 if intro_lines or no_intro:
                     intro_embed = discord.Embed(
                         title="\U0001f44b Meet Your Group",
@@ -640,7 +833,7 @@ class TimerCog(BaseCog):
             except Exception as e:
                 self.logger.error(f"Error loading intros: {e}", exc_info=True)
 
-        # Send one public timer embed, ack the interaction ephemerally
+        # Acknowledge the slash command ephemerally, then send the public timer embed
         await interaction.followup.send("\U0001f399\ufe0f Timer started!", ephemeral=True)
         await timer.start()
 
@@ -650,7 +843,11 @@ class TimerCog(BaseCog):
     )
     @app_commands.describe(minutes="Extra minutes to add (default: 1)")
     async def timer_add(self, interaction: discord.Interaction, minutes: int = 1):
-        """Add time to the current speaker"""
+        """Add extra minutes to the current speaker's remaining time.
+
+        This is a standalone slash command (separate from the button) so
+        facilitators can add arbitrary amounts of time, not just 1 minute.
+        """
         await interaction.response.defer(ephemeral=True)
 
         channel = interaction.channel
@@ -669,4 +866,5 @@ class TimerCog(BaseCog):
 
 
 async def setup(bot):
+    """Entry point for discord.py's cog loading system."""
     await bot.add_cog(TimerCog(bot))

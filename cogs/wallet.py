@@ -1,3 +1,19 @@
+"""
+Wallet registration and ENS resolution cog for the ZAO Fractal Bot.
+
+Provides two lookup tables that map Discord users to Ethereum wallet addresses:
+
+1. **Discord ID wallets** (``wallets.json``) -- permanent links created via
+   ``/register`` or ``/admin_register``.  Keyed by Discord snowflake ID.
+2. **Name wallets** (``names_to_wallets.json``) -- pre-populated list of
+   display-name-to-wallet mappings used as a fallback.  These are "fragile"
+   because they break when a user changes their Discord name.
+
+The ``WalletRegistry`` class is attached to the bot instance so other cogs
+(proposals, hats, guide leaderboard) can look up wallets without importing
+this module directly.
+"""
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -13,27 +29,38 @@ WALLETS_FILE = os.path.join(DATA_DIR, 'wallets.json')
 NAMES_FILE = os.path.join(DATA_DIR, 'names_to_wallets.json')
 
 
+# ---------------------------------------------------------------------------
+# Ethereum / ENS validation helpers
+# ---------------------------------------------------------------------------
+
 def is_valid_address(address: str) -> bool:
-    """Validate Ethereum address format"""
+    """Return ``True`` if *address* matches the 0x-prefixed, 40-hex-char format."""
     return bool(re.match(r'^0x[0-9a-fA-F]{40}$', address))
 
 
 def is_ens_name(name: str) -> bool:
-    """Check if a string looks like an ENS name"""
+    """Return ``True`` if *name* looks like an ENS domain (e.g. ``vitalik.eth``)."""
     return bool(re.match(r'^[a-zA-Z0-9\-]+\.eth$', name.strip()))
 
 
 async def resolve_ens(name: str) -> str | None:
-    """Resolve an ENS name to an Ethereum address using Cloudflare ETH gateway"""
+    """Resolve an ENS name to a checksummed Ethereum address.
+
+    Tries two strategies in order:
+    1. Direct onchain resolution via the ENS Universal Resolver contract,
+       called through Cloudflare's public Ethereum RPC.
+    2. Fallback to the ensdata.net REST API if the onchain call fails.
+
+    Returns ``None`` if both strategies fail.
+    """
     try:
         async with aiohttp.ClientSession() as session:
-            # Use Cloudflare's public Ethereum RPC
+            # Strategy 1: onchain resolution via Cloudflare ETH gateway.
             payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "eth_call",
                 "params": [{
-                    # ENS registry: resolver(namehash)
                     "to": "0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63",  # ENS Universal Resolver
                     "data": _encode_resolve(name)
                 }, "latest"]
@@ -42,12 +69,13 @@ async def resolve_ens(name: str) -> str | None:
                 data = await resp.json()
                 result = data.get("result", "0x")
                 if result and result != "0x" and len(result) >= 66:
-                    # Extract address from response (last 20 bytes of first 32-byte word)
+                    # The resolved address occupies the first 32-byte ABI word
+                    # (right-aligned), so bytes 6..66 after the "0x" prefix.
                     address = "0x" + result[26:66]
                     if is_valid_address(address) and address != "0x0000000000000000000000000000000000000000":
                         return address
 
-        # Fallback: use ensdata.net API
+        # Strategy 2: REST API fallback.
         async with aiohttp.ClientSession() as session:
             async with session.get(f"https://api.ensdata.net/{name}") as resp:
                 if resp.status == 200:
@@ -62,39 +90,42 @@ async def resolve_ens(name: str) -> str | None:
 
 
 def _encode_resolve(name: str) -> str:
-    """Encode ENS name for the universal resolver's resolve(bytes,bytes) call"""
+    """Build the ABI-encoded calldata for ``resolve(bytes,bytes)`` on the ENS Universal Resolver.
+
+    The inner call is ``addr(bytes32 namehash)`` (selector ``0x3b3b57de``).
+    The outer call wraps that inside ``resolve(bytes dnsName, bytes data)``
+    (selector ``0x9061b923``).
+    """
     import hashlib
 
-    # DNS-encode the name
+    # Step 1: DNS-wire-format encode the name (length-prefixed labels + null terminator).
     dns_encoded = b""
     for label in name.split("."):
         encoded_label = label.encode("utf-8")
         dns_encoded += bytes([len(encoded_label)]) + encoded_label
     dns_encoded += b"\x00"
 
-    # addr(bytes32) selector = 0x3b3b57de + namehash
+    # Step 2: Build the inner calldata -- addr(namehash).
     namehash = _namehash(name)
     inner_data = bytes.fromhex("3b3b57de") + bytes.fromhex(namehash[2:])
 
-    # resolve(bytes,bytes) selector = 0x9061b923
+    # Step 3: ABI-encode resolve(bytes, bytes).
     selector = "9061b923"
 
-    # ABI encode: offset to dns_name, offset to inner_data, then the data
-    # offset to dns_name = 64 (0x40)
-    # offset to inner_data = 64 + 32 + ceil(len(dns)/32)*32
+    # Pad both dynamic byte arrays to 32-byte boundaries for ABI encoding.
     dns_padded_len = ((len(dns_encoded) + 31) // 32) * 32
     inner_padded_len = ((len(inner_data) + 31) // 32) * 32
 
-    offset1 = 64  # offset to first bytes param
-    offset2 = offset1 + 32 + dns_padded_len  # offset to second bytes param
+    offset1 = 64  # byte offset to dns_encoded length word
+    offset2 = offset1 + 32 + dns_padded_len  # byte offset to inner_data length word
 
     result = selector
     result += offset1.to_bytes(32, "big").hex()
     result += offset2.to_bytes(32, "big").hex()
-    # dns_encoded bytes
+    # First dynamic param: dns_encoded
     result += len(dns_encoded).to_bytes(32, "big").hex()
     result += dns_encoded.hex().ljust(dns_padded_len * 2, "0")
-    # inner_data bytes
+    # Second dynamic param: inner_data
     result += len(inner_data).to_bytes(32, "big").hex()
     result += inner_data.hex().ljust(inner_padded_len * 2, "0")
 
@@ -102,13 +133,21 @@ def _encode_resolve(name: str) -> str:
 
 
 def _namehash(name: str) -> str:
-    """Compute ENS namehash using Keccak-256 (not NIST SHA-3)"""
+    """Compute the ENS namehash (EIP-137) for *name*.
+
+    Requires Keccak-256, which is *not* the same as Python's built-in
+    ``hashlib.sha3_256`` (that's NIST SHA-3).  The function tries three
+    backends in order of correctness:
+    1. ``pysha3`` (provides real Keccak)
+    2. ``pycryptodome`` (``Crypto.Hash.keccak``)
+    3. stdlib ``hashlib.sha3_256`` as a last resort -- technically wrong,
+       but the ensdata.net REST fallback in ``resolve_ens`` will still
+       succeed even if the onchain resolution doesn't.
+    """
     from hashlib import new as hashlib_new
     def keccak256(data: bytes) -> bytes:
         return hashlib_new("sha3_256", data, usedforsecurity=False).digest()
 
-    # Python's hashlib.sha3_256 is NIST SHA-3, not Keccak-256.
-    # Use pysha3 or pycryptodome if available, otherwise fall back to sha3_256.
     try:
         import sha3  # pysha3 provides real keccak
         def keccak256(data: bytes) -> bytes:
@@ -121,11 +160,13 @@ def _namehash(name: str) -> str:
             def keccak256(data: bytes) -> bytes:
                 return _keccak.new(digest_bits=256, data=data).digest()
         except ImportError:
-            # Last resort: use the built-in (wrong for ENS but ensdata.net fallback saves us)
+            # Last resort: wrong hash but the REST fallback covers us.
             import hashlib
             def keccak256(data: bytes) -> bytes:
                 return hashlib.sha3_256(data).digest()
 
+    # Namehash algorithm: start with 32 zero bytes, then iteratively hash
+    # ``node + keccak256(label)`` for each label from right to left.
     node = b"\x00" * 32
     if name:
         labels = name.split(".")
@@ -135,8 +176,20 @@ def _namehash(name: str) -> str:
     return "0x" + node.hex()
 
 
+# ---------------------------------------------------------------------------
+# Wallet Registry (dual-table lookup)
+# ---------------------------------------------------------------------------
+
 class WalletRegistry:
-    """Manages discord_id -> wallet_address mappings with JSON persistence"""
+    """Two-tier lookup from Discord users to Ethereum wallet addresses.
+
+    Tier 1 (permanent): Discord snowflake ID -> wallet, stored in ``wallets.json``.
+    Tier 2 (fragile):   Display name -> wallet, stored in ``names_to_wallets.json``.
+
+    ``lookup()`` checks Tier 1 first, then falls back to Tier 2 using the
+    member's display name, username, and global name.  Admins can promote
+    Tier 2 matches to Tier 1 with ``/admin_lock_wallets``.
+    """
 
     def __init__(self):
         self.logger = logging.getLogger('bot')
@@ -145,36 +198,33 @@ class WalletRegistry:
         self._load()
 
     def _load(self):
-        """Load wallets from JSON files"""
-        # Load discord ID -> wallet mappings
+        """Load both wallet JSON files from disk on startup."""
         if os.path.exists(WALLETS_FILE):
             with open(WALLETS_FILE, 'r') as f:
                 self._discord_wallets = json.load(f)
             self.logger.info(f"Loaded {len(self._discord_wallets)} discord wallet mappings")
 
-        # Load name -> wallet mappings (pre-populated list)
         if os.path.exists(NAMES_FILE):
             with open(NAMES_FILE, 'r') as f:
                 self._name_wallets = json.load(f)
             self.logger.info(f"Loaded {len(self._name_wallets)} name wallet mappings")
 
     def _save(self):
-        """Save discord wallet mappings to JSON"""
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(WALLETS_FILE, 'w') as f:
-            json.dump(self._discord_wallets, f, indent=2)
+        """Persist Discord-ID wallet mappings atomically."""
+        from utils.safe_json import atomic_save
+        atomic_save(WALLETS_FILE, self._discord_wallets)
 
     def register(self, discord_id: int, wallet: str) -> None:
-        """Register a wallet for a discord user"""
+        """Create or update a permanent Discord-ID -> wallet link."""
         self._discord_wallets[str(discord_id)] = wallet
         self._save()
 
     def get_by_discord_id(self, discord_id: int) -> str | None:
-        """Look up wallet by discord ID"""
+        """Return wallet for *discord_id*, or ``None`` if not registered."""
         return self._discord_wallets.get(str(discord_id))
 
     def get_by_name(self, display_name: str) -> str | None:
-        """Look up wallet by display name (case-insensitive fuzzy match)"""
+        """Case-insensitive lookup against the pre-populated name table."""
         name_lower = display_name.lower().strip()
         for name, wallet in self._name_wallets.items():
             if name.lower().strip() == name_lower:
@@ -182,23 +232,24 @@ class WalletRegistry:
         return None
 
     def lookup(self, member: discord.Member) -> str | None:
-        """Look up wallet for a Discord member - tries ID first, then name matching"""
-        # Try exact discord ID match first
+        """Best-effort wallet lookup: ID -> display name -> username -> global name.
+
+        Returns the first match found, or ``None``.
+        """
+        # Tier 1: permanent Discord-ID link (from /register)
         wallet = self.get_by_discord_id(member.id)
         if wallet:
             return wallet
 
-        # Try display name match
+        # Tier 2: fragile name-based matching (display name, username, global name)
         wallet = self.get_by_name(member.display_name)
         if wallet:
             return wallet
 
-        # Try username match
         wallet = self.get_by_name(member.name)
         if wallet:
             return wallet
 
-        # Try global name match
         if member.global_name:
             wallet = self.get_by_name(member.global_name)
             if wallet:
@@ -207,21 +258,21 @@ class WalletRegistry:
         return None
 
     def get_all_discord(self) -> dict:
-        """Get all discord ID -> wallet mappings"""
+        """Return a shallow copy of all Discord-ID -> wallet mappings."""
         return dict(self._discord_wallets)
 
     def get_all_names(self) -> dict:
-        """Get all name -> wallet mappings"""
+        """Return a shallow copy of all name -> wallet mappings."""
         return dict(self._name_wallets)
 
     def add_name_mapping(self, name: str, wallet: str) -> None:
-        """Add a name -> wallet mapping"""
+        """Insert or update a name -> wallet entry and persist immediately."""
         self._name_wallets[name] = wallet
         with open(NAMES_FILE, 'w') as f:
             json.dump(self._name_wallets, f, indent=2)
 
     def stats(self) -> dict:
-        """Get registry stats"""
+        """Return summary counts for the admin dashboard."""
         return {
             'discord_linked': len(self._discord_wallets),
             'name_entries': len(self._name_wallets),
@@ -230,17 +281,25 @@ class WalletRegistry:
 
 
 class WalletCog(commands.Cog):
-    """Cog for wallet registration and lookup"""
+    """Discord slash-command interface for wallet registration and admin tools.
+
+    Exposes ``/register``, ``/wallet``, ``/admin_register``, ``/admin_wallets``,
+    ``/admin_lookup``, ``/admin_match_all``, and ``/admin_lock_wallets``.
+
+    On init the ``WalletRegistry`` singleton is attached to ``bot.wallet_registry``
+    so other cogs (proposals, hats, history) can resolve wallets without a
+    direct import dependency.
+    """
 
     def __init__(self, bot):
         self.bot = bot
         self.logger = logging.getLogger('bot')
         self.registry = WalletRegistry()
-        # Store on bot for access from other cogs
+        # Attach to the bot instance for cross-cog access.
         bot.wallet_registry = self.registry
 
     def is_supreme_admin(self, member: discord.Member) -> bool:
-        """Check if a member has the Supreme Admin role"""
+        """Return ``True`` if *member* holds the Supreme Admin Discord role."""
         return any(role.id == SUPREME_ADMIN_ROLE_ID for role in member.roles)
 
     @app_commands.command(
@@ -249,7 +308,11 @@ class WalletCog(commands.Cog):
     )
     @app_commands.describe(wallet="Your Ethereum wallet address (0x...) or ENS name (e.g. vitalik.eth)")
     async def register(self, interaction: discord.Interaction, wallet: str):
-        """Register your wallet address or ENS name"""
+        """Link the calling user's Discord account to an Ethereum address.
+
+        Accepts either a raw ``0x`` address or an ENS name (resolved on the fly).
+        The mapping is stored permanently by Discord ID.
+        """
         await interaction.response.defer(ephemeral=True)
 
         wallet = wallet.strip()
@@ -294,7 +357,7 @@ class WalletCog(commands.Cog):
         description="Show your registered wallet address"
     )
     async def wallet(self, interaction: discord.Interaction):
-        """Show your registered wallet"""
+        """Display the calling user's linked wallet and how it was matched."""
         await interaction.response.defer(ephemeral=True)
 
         wallet = self.registry.lookup(interaction.user)
@@ -316,7 +379,7 @@ class WalletCog(commands.Cog):
     )
     @app_commands.describe(user="Discord user", wallet="Their Ethereum wallet address or ENS name")
     async def admin_register(self, interaction: discord.Interaction, user: discord.Member, wallet: str):
-        """Admin: register wallet or ENS for another user"""
+        """Admin-only: create a permanent wallet link on behalf of another member."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -356,7 +419,7 @@ class WalletCog(commands.Cog):
         description="[ADMIN] List all wallet registrations and stats"
     )
     async def admin_wallets(self, interaction: discord.Interaction):
-        """Admin: list all wallet registrations"""
+        """Admin-only: display a summary of all wallet registrations (capped at 20)."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -377,7 +440,7 @@ class WalletCog(commands.Cog):
                 try:
                     member = interaction.guild.get_member(int(did))
                     name = member.display_name if member else f"ID:{did}"
-                except:
+                except (ValueError, AttributeError):
                     name = f"ID:{did}"
                 msg += f"• {name}: `{short}`\n"
 
@@ -394,7 +457,7 @@ class WalletCog(commands.Cog):
     )
     @app_commands.describe(user="Discord user to look up")
     async def admin_lookup(self, interaction: discord.Interaction, user: discord.Member):
-        """Admin: look up wallet for a user"""
+        """Admin-only: show how a specific user's wallet was resolved (ID vs name match)."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -424,7 +487,14 @@ class WalletCog(commands.Cog):
         description="[ADMIN] Auto-match all server members to wallets — saves full report to file"
     )
     async def admin_match_all(self, interaction: discord.Interaction):
-        """Admin: match all guild members to wallets, send full report as file"""
+        """Admin-only: iterate every guild member, try to match a wallet, and
+        produce a full text + JSON report uploaded as a file attachment.
+
+        Members are bucketed into three categories:
+        - *by_discord_id*: permanently linked via ``/register``
+        - *by_name_match*: matched by display/user/global name (fragile)
+        - *no_wallet*: no match found at all
+        """
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -538,7 +608,11 @@ class WalletCog(commands.Cog):
         description="[ADMIN] Lock all name-matched wallets to Discord IDs (makes them permanent)"
     )
     async def admin_lock_wallets(self, interaction: discord.Interaction):
-        """Admin: convert all name-matched wallets into permanent Discord ID links"""
+        """Admin-only: promote every Tier-2 (name) wallet match to a permanent
+        Tier-1 (Discord ID) registration.
+
+        This prevents matches from breaking when users change their display names.
+        """
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -585,11 +659,12 @@ class WalletCog(commands.Cog):
 
         msg += f"\nThese {len(locked)} members now have permanent Discord ID → wallet links that won't break if they change their display name."
 
-        if len(msg) > 1900:
-            msg = msg[:1900] + "\n... (truncated)"
+        if len(msg) > 1950:
+            msg = msg[:1950] + "\n... (truncated)"
 
         await interaction.followup.send(msg, ephemeral=True)
 
 
 async def setup(bot):
+    """Entry point called by ``bot.load_extension('cogs.wallet')``."""
     await bot.add_cog(WalletCog(bot))

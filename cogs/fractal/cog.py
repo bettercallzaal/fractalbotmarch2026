@@ -1,30 +1,79 @@
+"""
+FractalCog -- Discord cog that exposes all slash commands for the ZAO Fractal
+voting system.
+
+This module is the primary entry-point for user and admin interactions.  It
+registers slash commands (/zaofractal, /randomize, /endgroup, /status, etc.)
+and a full suite of admin-only commands for managing live fractal sessions.
+
+Architecture:
+    FractalCog  (this file)  -- slash command handlers; orchestrates the flow
+    FractalGroup (group.py)  -- per-session state machine (voting rounds, results)
+    views.py                 -- Discord UI components (buttons, modals)
+
+The cog inherits from BaseCog, which provides common helpers like
+``check_voice_state`` and ``is_supreme_admin``.
+"""
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
 import random
 import math
-from datetime import datetime
+import asyncio
+from datetime import datetime, timezone
 from ..base import BaseCog
 from .views import MemberConfirmationView
 from .group import FractalGroup
 from config.config import INTROS_CHANNEL_ID
 
+
 class FractalCog(BaseCog):
-    """Cog for handling ZAO Fractal voting commands and logic"""
+    """Discord cog that registers and handles all ZAO Fractal slash commands.
+
+    Responsible for:
+    - Creating fractal groups from voice-channel members (/zaofractal)
+    - Randomising waiting-room members into breakout rooms (/randomize)
+    - Providing status, wallet, and admin management commands
+    - Tracking active groups and daily creation counters per guild
+    """
 
     def __init__(self, bot):
+        """Initialise the cog and its internal tracking structures.
+
+        Args:
+            bot: The Discord bot instance that owns this cog.
+        """
         super().__init__(bot)
         self.bot = bot
         self.logger = logging.getLogger('bot')
-        self.active_groups = {}  # Dict mapping thread_id to FractalGroup
-        self.daily_counters = {}  # Dict mapping guild_id -> {date: counter}
+        # Maps Discord thread ID -> FractalGroup for every in-progress session
+        self.active_groups = {}
+        # Tracks how many groups have been created per guild per day,
+        # keyed as guild_id -> {date_string: count}
+        self.daily_counters = {}
+        # Async lock to prevent race conditions when multiple commands
+        # concurrently mutate active_groups
+        self._groups_lock = asyncio.Lock()
 
-        # Create admin command group
+        # Placeholder for a Discord app-command group (not currently mounted)
         self.admin_group = app_commands.Group(name="admin", description="Admin commands for fractal management")
 
     def _get_next_group_name(self, guild_id: int) -> str:
-        """Generate auto-incremented group name for the day"""
+        """Return a unique, human-readable group name for today's date.
+
+        Names follow the pattern ``Fractal Group <n> - <date>`` where *n*
+        auto-increments each time a new group is created in the same guild on
+        the same calendar day.  The counter resets implicitly when a new date
+        string appears.
+
+        Args:
+            guild_id: The Discord guild snowflake to scope the counter.
+
+        Returns:
+            A formatted group name string.
+        """
         today = datetime.now().strftime("%b %d, %Y")
 
         if guild_id not in self.daily_counters:
@@ -38,14 +87,28 @@ class FractalCog(BaseCog):
 
         return f"Fractal Group {counter} - {today}"
 
+    # ------------------------------------------------------------------
+    # Primary user-facing commands
+    # ------------------------------------------------------------------
+
     @app_commands.command(
         name="zaofractal",
         description="Create a new ZAO fractal voting group from your current voice channel"
     )
     @app_commands.describe(name="Custom name for this fractal group (optional)")
     async def zaofractal(self, interaction: discord.Interaction, name: str = None):
-        """Create a new ZAO fractal voting group from voice channel members"""
-        # Check if interaction has already been responded to
+        """Start the fractal creation flow for the invoking user's voice channel.
+
+        Steps:
+        1. Verify the caller is in a voice channel (via BaseCog helper).
+        2. Look up each voice-channel member's wallet and intro status so the
+           facilitator can see who is ready before confirming.
+        3. Present a MemberConfirmationView with Start / Modify buttons.
+
+        The actual fractal session is not created here -- it is created in
+        FractalNameModal.on_submit once the facilitator confirms.
+        """
+        # Guard: Discord may fire the interaction twice in rare cases
         if interaction.response.is_done():
             return
 
@@ -56,25 +119,26 @@ class FractalCog(BaseCog):
         except discord.InteractionResponded:
             pass
 
-        # Check user's voice state
+        # Ensure the caller is in a voice channel and collect its members
         voice_check = await self.check_voice_state(interaction.user)
         if not voice_check['success']:
             try:
                 await interaction.followup.send(voice_check['message'], ephemeral=True)
-            except:
+            except (discord.NotFound, discord.HTTPException) as e:
+                self.logger.warning(f"Followup failed, falling back to channel send: {e}")
                 await interaction.channel.send(f"{interaction.user.mention} {voice_check['message']}")
             return
 
         members = voice_check['members']
 
-        # Store custom name for use in confirmation view
         custom_name = name
 
-        # Check wallet and intro status for each member
+        # --- Pre-flight readiness checks for each member ---
         registry = getattr(self.bot, 'wallet_registry', None)
         self.logger.info(f"Wallet registry available: {registry is not None}")
 
-        # Get intro cache from IntroCog
+        # Pull cached intro data from IntroCog so we can flag members
+        # who haven't introduced themselves yet
         intro_cog = self.bot.get_cog('IntroCog')
         intro_cache = intro_cog.intro_cache if intro_cog else None
 
@@ -91,7 +155,7 @@ class FractalCog(BaseCog):
                 without_intro.append(member)
             member_status.append((member, wallet, has_intro))
 
-        # Build confirmation message with wallet + intro status
+        # --- Build a rich confirmation message showing readiness icons ---
         lines = [f"**Start fractal{f' ({custom_name})' if custom_name else ''}?**\n"]
         for member, wallet, has_intro in member_status:
             wallet_icon = "✅" if wallet else "❌"
@@ -104,6 +168,7 @@ class FractalCog(BaseCog):
             suffix = f" — {', '.join(issues)}" if issues else ""
             lines.append(f"{wallet_icon}{intro_icon} {member.mention}{suffix}")
 
+        # Append aggregate warnings so the facilitator knows at a glance
         warnings = []
         if without_wallet:
             warnings.append(f"⚠️ **{len(without_wallet)}** member(s) have no wallet. They should `/register` before results are submitted onchain.")
@@ -115,11 +180,13 @@ class FractalCog(BaseCog):
 
         confirm_msg = "\n".join(lines)
 
-        # Send member confirmation
+        # Present the confirmation view; the facilitator clicks Start to proceed
         view = MemberConfirmationView(self, members, interaction.user, custom_name=custom_name)
         try:
             await interaction.followup.send(confirm_msg, view=view, ephemeral=True)
-        except:
+        except (discord.NotFound, discord.HTTPException) as e:
+            # Interaction webhook may have expired; fall back to a channel message
+            self.logger.warning(f"Followup failed, falling back to channel send: {e}")
             await interaction.channel.send(
                 f"{interaction.user.mention} {confirm_msg}",
                 view=view
@@ -147,7 +214,19 @@ class FractalCog(BaseCog):
         facilitator_5: discord.Member = None,
         facilitator_6: discord.Member = None,
     ):
-        """Randomly split waiting room members into fractal-1, fractal-2, etc."""
+        """Randomly distribute waiting-room members into breakout voice channels.
+
+        Admin-only.  Finds all human members in the "Fractal Waiting Room"
+        voice channel, shuffles them, and moves them into ``fractal-1``,
+        ``fractal-2``, etc.  Facilitators can be pre-assigned to specific
+        rooms; everyone else is placed via greedy round-robin into the
+        smallest group.  Groups are capped at 6 members each.
+
+        The number of breakout rooms is the greater of:
+        - ceil(total_people / 6)  -- enough rooms to fit everyone
+        - the highest facilitator slot index  -- so that all named
+          facilitators have a room to go to
+        """
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -156,14 +235,15 @@ class FractalCog(BaseCog):
 
         guild = interaction.guild
 
-        # Collect facilitator assignments (index -> member)
+        # Map the six optional facilitator params into a dict keyed by room
+        # index (0-based) for convenient lookup
         facilitator_params = [facilitator_1, facilitator_2, facilitator_3, facilitator_4, facilitator_5, facilitator_6]
         facilitators = {}  # room index (0-based) -> member
         for i, fac in enumerate(facilitator_params):
             if fac is not None:
                 facilitators[i] = fac
 
-        # Find the Fractal Waiting Room voice channel (case-insensitive)
+        # Locate the staging voice channel by name (case-insensitive)
         waiting_room = None
         for channel in guild.voice_channels:
             if "fractal waiting room" in channel.name.lower():
@@ -174,14 +254,15 @@ class FractalCog(BaseCog):
             await interaction.followup.send("❌ Could not find a **Fractal Waiting Room** voice channel.", ephemeral=True)
             return
 
-        # Get non-bot members in waiting room
+        # Exclude bots from the participant list
         all_members = [m for m in waiting_room.members if not m.bot]
 
-        # Separate facilitators from the random pool
+        # Facilitators are placed deterministically, so remove them from the
+        # pool that gets shuffled
         facilitator_ids = {fac.id for fac in facilitators.values()}
         random_pool = [m for m in all_members if m.id not in facilitator_ids]
 
-        # Check if any assigned facilitators aren't in the waiting room
+        # Sanity check: all named facilitators must actually be present
         waiting_ids = {m.id for m in all_members}
         not_in_room = [fac for fac in facilitators.values() if fac.id not in waiting_ids]
         if not_in_room:
@@ -197,12 +278,13 @@ class FractalCog(BaseCog):
             await interaction.followup.send("❌ Need at least 2 members in the Fractal Waiting Room to randomize.", ephemeral=True)
             return
 
-        # Determine number of groups: at least enough for all people, and at least enough for the highest facilitator slot
+        # Compute room count: enough for 6-person cap AND enough for every
+        # facilitator slot that was specified
         min_groups_for_people = math.ceil(total_people / 6)
         min_groups_for_facilitators = (max(facilitators.keys()) + 1) if facilitators else 0
         num_groups = max(min_groups_for_people, min_groups_for_facilitators)
 
-        # Find or validate fractal room channels (fractal-1, fractal-2, etc.)
+        # Verify that the required voice channels (fractal-1 .. fractal-N) exist
         fractal_rooms = []
         missing_rooms = []
         for i in range(1, num_groups + 1):
@@ -224,23 +306,22 @@ class FractalCog(BaseCog):
             )
             return
 
-        # Pre-assign facilitators to their rooms
+        # Seed each group with its pre-assigned facilitator
         groups = [[] for _ in range(num_groups)]
         group_facilitators = {}  # room index -> facilitator member
         for room_idx, fac in facilitators.items():
             groups[room_idx].append(fac)
             group_facilitators[room_idx] = fac
 
-        # Shuffle remaining members randomly
+        # Shuffle the remaining pool to ensure fairness
         random.shuffle(random_pool)
 
-        # Distribute remaining members evenly via round-robin, respecting max 6
+        # Greedy fill: always place the next member in the smallest group
         for member in random_pool:
-            # Find the group with the fewest members (that isn't full)
             min_idx = min(range(num_groups), key=lambda idx: len(groups[idx]))
             groups[min_idx].append(member)
 
-        # Move members to their assigned rooms
+        # Move every member to their target voice channel
         move_results = []
         failed_moves = []
         for group_idx, group_members in enumerate(groups):
@@ -256,7 +337,7 @@ class FractalCog(BaseCog):
             fac_label = f" | Facilitator: **{fac.display_name}**" if fac else ""
             move_results.append(f"**{room.name}** ({len(group_members)}){fac_label}\n> {member_names}")
 
-        # Build result message
+        # Report results to the admin
         msg = f"# Randomized {total_people} members into {num_groups} groups\n\n"
         msg += "\n\n".join(move_results)
 
@@ -272,28 +353,32 @@ class FractalCog(BaseCog):
         description="End an active fractal group (facilitator only)"
     )
     async def end_group(self, interaction: discord.Interaction):
-        """End an active fractal group"""
+        """Allow the facilitator to gracefully end their fractal session early.
+
+        Must be invoked inside the fractal's Discord thread.  Only the
+        designated facilitator may use it; admins should use
+        ``/admin_end_fractal`` instead.
+        """
         await interaction.response.defer(ephemeral=True)
 
-        # Check if in a fractal thread
+        # Must be called from within a thread, not a regular channel
         if not isinstance(interaction.channel, discord.Thread):
             await interaction.followup.send("❌ This command can only be used in a fractal group thread.", ephemeral=True)
             return
 
-        # Check if this is an active fractal group
         group = self.active_groups.get(interaction.channel.id)
         if not group:
             await interaction.followup.send("❌ This thread is not an active fractal group.", ephemeral=True)
             return
 
-        # Check if user is facilitator
+        # Only the facilitator who created the session may end it
         if interaction.user.id != group.facilitator.id:
             await interaction.followup.send("❌ Only the group facilitator can end the fractal group.", ephemeral=True)
             return
 
-        # End the fractal group (end_fractal() removes from active_groups itself)
+        # end_fractal() posts results and cleans up active_groups internally;
+        # the pop() is a defensive guard against partial cleanup
         await group.end_fractal()
-        # Guard against double-delete since end_fractal() already removes it
         self.active_groups.pop(interaction.channel.id, None)
 
         await interaction.followup.send("✅ Fractal group ended successfully.", ephemeral=True)
@@ -303,7 +388,11 @@ class FractalCog(BaseCog):
         description="Show the current status of an active fractal group"
     )
     async def status(self, interaction: discord.Interaction):
-        """Show the status of an active fractal group"""
+        """Display a summary of the active fractal in the current thread.
+
+        Shows facilitator, current level, member/candidate counts, votes
+        cast, and any winners determined so far.
+        """
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.NotFound:
@@ -344,7 +433,11 @@ class FractalCog(BaseCog):
         description="Show wallet addresses for all members in the current fractal group"
     )
     async def groupwallets(self, interaction: discord.Interaction):
-        """List wallet addresses for all members in the active fractal group"""
+        """Show each group member's registered wallet address.
+
+        Useful before finalising a fractal so the facilitator can verify
+        everyone's wallet is linked for the onchain submission.
+        """
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.NotFound:
@@ -385,14 +478,21 @@ class FractalCog(BaseCog):
 
         await interaction.followup.send(msg, ephemeral=True)
 
-    # Admin Commands
+    # ------------------------------------------------------------------
+    # Admin commands -- all require the "Supreme Admin" role
+    # ------------------------------------------------------------------
+
     @app_commands.command(
         name="admin_end_fractal",
         description="[ADMIN] Force end any active fractal group"
     )
     @app_commands.describe(thread_id="ID of the thread to end (optional)")
     async def admin_end_fractal(self, interaction: discord.Interaction, thread_id: str = None):
-        """Admin command to force end fractals"""
+        """Force-end a specific fractal by thread ID, or list all active fractals.
+
+        When called without ``thread_id``, prints all running fractals so the
+        admin can pick which one to terminate.
+        """
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -429,7 +529,7 @@ class FractalCog(BaseCog):
         description="[ADMIN] List all active fractal groups"
     )
     async def admin_list_fractals(self, interaction: discord.Interaction):
-        """Admin command to list all active fractals"""
+        """List every in-progress fractal on this server with key metadata."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -457,7 +557,7 @@ class FractalCog(BaseCog):
         description="[ADMIN] Clean up old/stuck fractal groups"
     )
     async def admin_cleanup(self, interaction: discord.Interaction):
-        """Admin command to cleanup stuck fractals"""
+        """Remove stale entries from active_groups whose threads no longer exist or are archived."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -474,7 +574,8 @@ class FractalCog(BaseCog):
                 if not thread or thread.archived:
                     to_remove.append(thread_id)
                     cleaned_count += 1
-            except:
+            except Exception as e:
+                self.logger.warning(f"Error checking thread {thread_id} during cleanup: {e}")
                 to_remove.append(thread_id)
                 cleaned_count += 1
 
@@ -487,14 +588,19 @@ class FractalCog(BaseCog):
             ephemeral=True
         )
 
-    # Force Round Progression Commands
+    # --- Round progression overrides ---
+
     @app_commands.command(
         name="admin_force_round",
         description="[ADMIN] Skip current voting and move to next level"
     )
     @app_commands.describe(thread_id="ID of the fractal thread")
     async def admin_force_round(self, interaction: discord.Interaction, thread_id: str):
-        """Admin command to force move to next round"""
+        """Skip the current round by selecting the leading candidate as winner.
+
+        If no votes have been cast, a random candidate is chosen.  Ties are
+        broken randomly.
+        """
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -539,7 +645,7 @@ class FractalCog(BaseCog):
     )
     @app_commands.describe(thread_id="ID of the fractal thread")
     async def admin_reset_votes(self, interaction: discord.Interaction, thread_id: str):
-        """Admin command to reset votes in current round"""
+        """Clear all votes in the current round so members can re-vote from scratch."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -571,7 +677,7 @@ class FractalCog(BaseCog):
     )
     @app_commands.describe(thread_id="ID of the fractal thread", user="User to declare as winner")
     async def admin_declare_winner(self, interaction: discord.Interaction, thread_id: str, user: discord.Member):
-        """Admin command to manually declare a winner"""
+        """Bypass voting and declare a specific member as the current-round winner."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -600,14 +706,15 @@ class FractalCog(BaseCog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error declaring winner: {str(e)}", ephemeral=True)
 
-    # Member Management Commands
+    # --- Member management overrides ---
+
     @app_commands.command(
         name="admin_add_member",
         description="[ADMIN] Add someone to an active fractal"
     )
     @app_commands.describe(thread_id="ID of the fractal thread", user="User to add to the fractal")
     async def admin_add_member(self, interaction: discord.Interaction, thread_id: str, user: discord.Member):
-        """Admin command to add member to active fractal"""
+        """Hot-add a user to a running fractal (adds to members, candidates, and thread)."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -651,7 +758,7 @@ class FractalCog(BaseCog):
     )
     @app_commands.describe(thread_id="ID of the fractal thread", user="User to remove from the fractal")
     async def admin_remove_member(self, interaction: discord.Interaction, thread_id: str, user: discord.Member):
-        """Admin command to remove member from active fractal"""
+        """Remove a user from a running fractal, revoking their vote if cast."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -695,7 +802,7 @@ class FractalCog(BaseCog):
     )
     @app_commands.describe(thread_id="ID of the fractal thread", user="New facilitator")
     async def admin_change_facilitator(self, interaction: discord.Interaction, thread_id: str, user: discord.Member):
-        """Admin command to change facilitator"""
+        """Transfer the facilitator role to another member mid-session."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -726,14 +833,18 @@ class FractalCog(BaseCog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error changing facilitator: {str(e)}", ephemeral=True)
 
-    # Group Control Commands
+    # --- Pause / resume / restart controls ---
+
     @app_commands.command(
         name="admin_pause_fractal",
         description="[ADMIN] Temporarily pause voting in a fractal"
     )
     @app_commands.describe(thread_id="ID of the fractal thread")
     async def admin_pause_fractal(self, interaction: discord.Interaction, thread_id: str):
-        """Admin command to pause fractal voting"""
+        """Suspend voting in a fractal. Votes submitted while paused are rejected.
+
+        Sets a ``paused`` flag on the FractalGroup that ``process_vote`` checks.
+        """
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -773,7 +884,7 @@ class FractalCog(BaseCog):
     )
     @app_commands.describe(thread_id="ID of the fractal thread")
     async def admin_resume_fractal(self, interaction: discord.Interaction, thread_id: str):
-        """Admin command to resume paused fractal"""
+        """Un-pause a previously paused fractal so voting can continue."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -809,7 +920,7 @@ class FractalCog(BaseCog):
     )
     @app_commands.describe(thread_id="ID of the fractal thread")
     async def admin_restart_fractal(self, interaction: discord.Interaction, thread_id: str):
-        """Admin command to restart fractal from beginning"""
+        """Reset a fractal back to Level 6 with the same members, discarding all progress."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -844,14 +955,15 @@ class FractalCog(BaseCog):
         except Exception as e:
             await interaction.followup.send(f"❌ Error restarting fractal: {str(e)}", ephemeral=True)
 
-    # Advanced Monitoring Commands
+    # --- Monitoring and data export ---
+
     @app_commands.command(
         name="admin_fractal_stats",
         description="[ADMIN] Detailed stats for a specific fractal group"
     )
     @app_commands.describe(thread_id="ID of the fractal thread")
     async def admin_fractal_stats(self, interaction: discord.Interaction, thread_id: str):
-        """Admin command to get detailed fractal stats"""
+        """Show granular stats for one fractal: vote distribution, winners so far, pause state."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -914,7 +1026,7 @@ class FractalCog(BaseCog):
         description="[ADMIN] Overall server fractal statistics"
     )
     async def admin_server_stats(self, interaction: discord.Interaction):
-        """Admin command to get server-wide fractal stats"""
+        """Aggregate statistics across all active fractals in this guild."""
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
@@ -963,7 +1075,11 @@ class FractalCog(BaseCog):
     )
     @app_commands.describe(thread_id="ID of the fractal thread (optional - exports all if not specified)")
     async def admin_export_data(self, interaction: discord.Interaction, thread_id: str = None):
-        """Admin command to export fractal data"""
+        """Export fractal state as a JSON file for offline analysis.
+
+        If ``thread_id`` is provided, exports only that fractal; otherwise
+        exports every active fractal in the current guild.
+        """
         await interaction.response.defer(ephemeral=True)
 
         if not self.is_supreme_admin(interaction.user):
