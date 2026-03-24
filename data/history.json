@@ -221,6 +221,55 @@
         }
       ],
       "completed_at": "2026-03-09T23:35:47.353269"
+    },
+    {
+      "id": 7,
+      "group_name": "Fractal 92 - Group 1",
+      "facilitator_id": "214921134477541377",
+      "facilitator_name": "Zaal",
+      "fractal_number": "92",
+      "group_number": "1",
+      "guild_id": "1127115902010277989",
+      "thread_id": "1485770365790584952",
+      "rankings": [
+        {
+          "user_id": "1071292017117761616",
+          "display_name": "Motomoto",
+          "level": 6,
+          "respect": 110
+        },
+        {
+          "user_id": "704093436952969246",
+          "display_name": "SwarthyHatter",
+          "level": 5,
+          "respect": 68
+        },
+        {
+          "user_id": "760585557834465311",
+          "display_name": "R\u0127ia23k",
+          "level": 4,
+          "respect": 42
+        },
+        {
+          "user_id": "691422751491227719",
+          "display_name": "OhnahjiB",
+          "level": 3,
+          "respect": 26
+        },
+        {
+          "user_id": "858425162297638942",
+          "display_name": "hurric4n3ike",
+          "level": 2,
+          "respect": 16
+        },
+        {
+          "user_id": "214921134477541377",
+          "display_name": "Zaal",
+          "level": 1,
+          "respect": 10
+        }
+      ],
+      "completed_at": "2026-03-23T22:45:27.709593+00:00"
     }
   ]
 }

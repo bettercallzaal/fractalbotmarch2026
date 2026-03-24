@@ -461,13 +461,14 @@
       "author_id": "214921134477541377",
       "thread_id": "1481360489593176086",
       "message_id": "1481360491614834892",
-      "status": "active",
+      "status": "closed",
       "votes": {},
       "options": [],
       "funding_amount": null,
       "image_url": null,
       "project_url": "https://artizen.fund/index/p/dark-rooms--immersive-experience",
-      "created_at": "2026-03-11T18:37:44.064787"
+      "created_at": "2026-03-11T18:37:44.064787",
+      "closed_at": "2026-03-23T21:32:35.399884+00:00"
     },
     "20": {
       "id": "20",
@@ -477,7 +478,7 @@
       "author_id": "214921134477541377",
       "thread_id": "1481360804371759282",
       "message_id": "1481360805948555426",
-      "status": "active",
+      "status": "closed",
       "votes": {
         "214921134477541377": {
           "value": "yes",
@@ -488,7 +489,8 @@
       "funding_amount": null,
       "image_url": null,
       "project_url": "https://artizen.fund/index/p/memethology",
-      "created_at": "2026-03-11T18:38:58.551421"
+      "created_at": "2026-03-11T18:38:58.551421",
+      "closed_at": "2026-03-23T21:32:36.229645+00:00"
     }
   },
   "_index_message_id": "1475629008933880055"

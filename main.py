@@ -189,6 +189,28 @@ async def on_ready():
     synced = await bot.tree.sync()
     logger.info(f"Synced {len(synced)} commands globally")
 
+    # Auto-match: scan all guild members and lock name-matched wallets to
+    # their Discord IDs so they become permanent.
+    if hasattr(bot, 'wallet_registry'):
+        registry = bot.wallet_registry
+        locked_count = 0
+        for guild in bot.guilds:
+            for member in guild.members:
+                if member.bot:
+                    continue
+                # Skip if already linked by Discord ID
+                if registry.get_by_discord_id(member.id):
+                    continue
+                # Try name match (display name, username, global name)
+                wallet = registry.get_by_name(member.display_name) or \
+                         registry.get_by_name(member.name) or \
+                         (registry.get_by_name(member.global_name) if member.global_name else None)
+                if wallet:
+                    registry.register(member.id, wallet)
+                    locked_count += 1
+                    logger.info(f"[AUTO-LOCK] {member.display_name} ({member.id}) -> {wallet[:10]}...")
+        logger.info(f"Auto-locked {locked_count} wallet(s) from name matching")
+
 
 # ---------------------------------------------------------------------------
 # Entry point

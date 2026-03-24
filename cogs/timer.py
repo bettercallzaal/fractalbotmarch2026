@@ -87,6 +87,8 @@ class PresentationTimer:
         # Warning flags prevent duplicate warning messages within a single turn
         self._warned_60 = False
         self._warned_30 = False
+        self._in_overtime = False
+        self.overtime_seconds = 45  # Grace period for picking next speaker
 
     @property
     def current_speaker(self) -> discord.Member | None:
@@ -111,6 +113,7 @@ class PresentationTimer:
         self.raised_hands = []
         self._warned_60 = False
         self._warned_30 = False
+        self._in_overtime = False
 
     def _reaction_bar(self) -> str:
         """Build a compact string summarizing current reaction counts.
@@ -149,7 +152,20 @@ class PresentationTimer:
             embed.set_footer(text="ZAO Fractal \u2022 zao.frapps.xyz")
             return embed
 
-        if status == "paused":
+        if status == "overtime":
+            remaining = max(0, self.end_timestamp - int(time.time()))
+            mins, secs = divmod(remaining, 60)
+            embed = discord.Embed(
+                title=f"\u23f0 OVERTIME — Pick Next Speaker!",
+                description=f"{speaker.mention}'s time is up! Use the dropdown or buttons to pick who goes next.",
+                color=0xED4245  # Red — urgency
+            )
+            embed.add_field(
+                name="Overtime",
+                value=f"**{mins}:{secs:02d}** remaining to pick",
+                inline=True
+            )
+        elif status == "paused":
             embed = discord.Embed(
                 title=f"\u23f8\ufe0f Presentations Paused",
                 description=f"Timer paused during {speaker.mention}'s turn.",
@@ -165,7 +181,6 @@ class PresentationTimer:
             )
             embed.add_field(
                 name="Time Remaining",
-                # Discord's <t:UNIX:R> renders as a live relative timestamp on the client
                 value=f"**{mins}:{secs:02d}**  (ends <t:{self.end_timestamp}:R>)",
                 inline=True
             )
@@ -273,10 +288,9 @@ class PresentationTimer:
     async def _countdown(self):
         """Background loop that waits for timer expiry and posts warnings.
 
-        Instead of polling every second, this sleeps in large jumps between
-        warning milestones (full duration -> 60s mark -> 30s mark -> expiry).
-        This reduces unnecessary wake-ups and API calls while still hitting
-        the warning thresholds accurately.
+        Updates the embed every 10 seconds for a live countdown on the left side.
+        When time expires, enters a 45-second overtime period for picking the
+        next speaker before auto-advancing.
         """
         while not self.is_done:
             remaining = self.end_timestamp - int(time.time())
@@ -287,8 +301,29 @@ class PresentationTimer:
                 await asyncio.sleep(1)
                 continue
 
-            if remaining <= 0:
+            # Overtime expired — auto-advance
+            if remaining <= 0 and self._in_overtime:
                 await self.advance()
+                return
+
+            # Main time expired — enter overtime
+            if remaining <= 0 and not self._in_overtime:
+                self._in_overtime = True
+                self.end_timestamp = int(time.time()) + self.overtime_seconds
+                await self._update_message("overtime")
+                warn = await self.channel.send(
+                    f"\u23f0 **{self.current_speaker.mention}'s time is up!** "
+                    f"You have **{self.overtime_seconds} seconds** to pick who goes next!"
+                )
+                asyncio.create_task(self._delete_after(warn, 15))
+                # Tight loop during overtime for live updates
+                while not self.is_done:
+                    ot_remaining = self.end_timestamp - int(time.time())
+                    if ot_remaining <= 0:
+                        await self.advance()
+                        return
+                    await self._update_message("overtime")
+                    await asyncio.sleep(5)
                 return
 
             # Time warnings — update the embed color/title and send ephemeral alerts
@@ -309,15 +344,17 @@ class PresentationTimer:
                 )
                 asyncio.create_task(self._delete_after(warn, 10))
 
-            # Sleep until the next milestone rather than polling every second.
-            # This is the key efficiency optimization: at most 3 wake-ups per speaker.
-            if remaining > 60:
-                await asyncio.sleep(remaining - 60)
-            elif remaining > 30:
-                await asyncio.sleep(remaining - 30)
+            # Update embed every 10 seconds for live countdown on the left side
+            status = "warning" if self._warned_60 and remaining <= 60 else "speaking"
+            await self._update_message(status)
+
+            # Sleep in shorter intervals for live updates, but still use
+            # milestones to avoid unnecessary work at the start
+            if remaining > 70:
+                await asyncio.sleep(min(remaining - 60, 10))
+            elif remaining > 35:
+                await asyncio.sleep(min(remaining - 30, 10))
             else:
-                # In the final 30 seconds, check more frequently in case of
-                # pause/resume or time additions that shift the deadline
                 await asyncio.sleep(min(remaining, 5))
 
     async def _delete_after(self, message: discord.Message, seconds: int):
