@@ -23,6 +23,7 @@ import discord
 import logging
 import asyncio
 import os
+import signal
 import shutil
 import traceback
 from datetime import datetime, timezone, timedelta
@@ -423,12 +424,28 @@ async def main():
     except OSError as e:
         logger.warning(f"Could not start health server on port {HEALTH_PORT}: {e}")
 
+    # ------------------------------------------------------------------
+    # Graceful shutdown via SIGTERM / SIGINT
+    # ------------------------------------------------------------------
+    def _request_shutdown():
+        logger.info("Shutting down gracefully...")
+        asyncio.ensure_future(bot.close())
+
+    try:
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, _request_shutdown)
+    except NotImplementedError:
+        # Windows does not support add_signal_handler; skip gracefully.
+        pass
+
     try:
         async with bot:
             await load_extensions()
             daily_backup.start()
             await bot.start(TOKEN)
     finally:
+        daily_backup.cancel()
         await runner.cleanup()
 
 

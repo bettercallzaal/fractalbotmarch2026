@@ -12,8 +12,10 @@ own dedup logic.
 
 import discord
 import logging
+from datetime import datetime, timezone
+from discord import app_commands
 from discord.ext import commands
-from config.config import SUPREME_ADMIN_ROLE_ID
+from config.config import SUPREME_ADMIN_ROLE_ID, VERSION
 
 
 class BaseCog(commands.Cog):
@@ -90,6 +92,38 @@ class BaseCog(commands.Cog):
             'members': members,
             'channel': user.voice.channel
         }
+
+    @app_commands.command(name="about", description="Show bot info, version, and uptime")
+    async def about(self, interaction: discord.Interaction):
+        """Display a public embed with bot info, uptime, and server count."""
+        now = datetime.now(timezone.utc)
+        start = getattr(self.bot, 'start_time', now)
+        delta = now - start
+        hours, remainder = divmod(int(delta.total_seconds()), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        days, hours = divmod(hours, 24)
+
+        uptime_parts = []
+        if days:
+            uptime_parts.append(f"{days}d")
+        if hours:
+            uptime_parts.append(f"{hours}h")
+        uptime_parts.append(f"{minutes}m {seconds}s")
+        uptime_str = " ".join(uptime_parts)
+
+        total_commands = len(self.bot.tree.get_commands())
+
+        embed = discord.Embed(
+            title="FractalBot",
+            description=f"v{VERSION}",
+            color=discord.Color.from_rgb(88, 101, 242),  # Blurple
+        )
+        embed.add_field(name="Uptime", value=uptime_str, inline=True)
+        embed.add_field(name="Servers", value=str(len(self.bot.guilds)), inline=True)
+        embed.add_field(name="Commands", value=str(total_commands), inline=True)
+        embed.set_footer(text="Built for ZAO Fractal \u2022 zao.frapps.xyz")
+
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):
