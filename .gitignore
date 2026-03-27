@@ -57,3 +57,6 @@ web/next-env.d.ts
 
 # Archives
 *.zip
+
+# Data backups
+backups/
