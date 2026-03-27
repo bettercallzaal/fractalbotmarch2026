@@ -23,6 +23,7 @@ import os
 import re
 import aiohttp
 from config.config import SUPREME_ADMIN_ROLE_ID
+from cogs.base import BaseCog
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
 WALLETS_FILE = os.path.join(DATA_DIR, 'wallets.json')
@@ -267,9 +268,9 @@ class WalletRegistry:
 
     def add_name_mapping(self, name: str, wallet: str) -> None:
         """Insert or update a name -> wallet entry and persist immediately."""
+        from utils.safe_json import atomic_save
         self._name_wallets[name] = wallet
-        with open(NAMES_FILE, 'w') as f:
-            json.dump(self._name_wallets, f, indent=2)
+        atomic_save(NAMES_FILE, self._name_wallets)
 
     def stats(self) -> dict:
         """Return summary counts for the admin dashboard."""
@@ -280,7 +281,7 @@ class WalletRegistry:
         }
 
 
-class WalletCog(commands.Cog):
+class WalletCog(BaseCog):
     """Discord slash-command interface for wallet registration and admin tools.
 
     Exposes ``/register``, ``/wallet``, ``/admin_register``, ``/admin_wallets``,
@@ -292,15 +293,10 @@ class WalletCog(commands.Cog):
     """
 
     def __init__(self, bot):
-        self.bot = bot
-        self.logger = logging.getLogger('bot')
+        super().__init__(bot)
         self.registry = WalletRegistry()
         # Attach to the bot instance for cross-cog access.
         bot.wallet_registry = self.registry
-
-    def is_supreme_admin(self, member: discord.Member) -> bool:
-        """Return ``True`` if *member* holds the Supreme Admin Discord role."""
-        return any(role.id == SUPREME_ADMIN_ROLE_ID for role in member.roles)
 
     @app_commands.command(
         name="register",

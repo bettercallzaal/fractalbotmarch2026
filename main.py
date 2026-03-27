@@ -41,6 +41,8 @@ elif not discord.opus.is_loaded():
 # ---------------------------------------------------------------------------
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN environment variable is required")
 # When DEBUG is true, the logger emits DEBUG-level messages for deeper tracing.
 DEBUG = os.getenv('DEBUG', 'FALSE').upper() == 'TRUE'
 
@@ -88,8 +90,7 @@ async def global_interaction_dedup(interaction: discord.Interaction) -> bool:
     individual command callback.  Returns ``False`` (= abort) if the
     interaction ID has already been seen, ``True`` otherwise.
 
-    Note: This is the bot-level guard.  Individual cogs also have access to
-    ``BaseCog.is_duplicate_interaction()`` for an additional per-cog check.
+    This is the single bot-level dedup guard that catches all duplicates.
     """
     cmd_name = interaction.command.name if interaction.command else "unknown"
     logger.info(f"[DEDUP] interaction_check: id={interaction.id} command={cmd_name} guild={interaction.guild_id}")

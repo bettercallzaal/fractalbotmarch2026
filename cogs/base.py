@@ -1,68 +1,19 @@
 """
 BaseCog -- Shared foundation for all FractalBot cogs.
 
-This module provides two things every other cog relies on:
+This module provides common helper methods on ``BaseCog`` -- permission checks,
+voice-state validation, and a pre-configured logger -- so that individual cogs
+can inherit from ``BaseCog`` instead of reimplementing boilerplate.
 
-1. **Interaction deduplication** (`_InteractionDedup` / `is_duplicate_interaction`):
-   discord.py may fire the same interaction twice when a command is registered
-   both globally and per-guild.  Every command handler should call
-   ``BaseCog.is_duplicate_interaction(interaction)`` at its very first line and
-   bail out if it returns ``True``.
-
-2. **Common helper methods** on ``BaseCog`` -- permission checks, voice-state
-   validation, and a pre-configured logger -- so that individual cogs can
-   inherit from ``BaseCog`` instead of reimplementing boilerplate.
+Interaction deduplication is handled globally in ``main.py`` via the
+``@bot.tree.interaction_check`` hook, so individual cogs do not need their
+own dedup logic.
 """
 
 import discord
 import logging
-from collections import OrderedDict
 from discord.ext import commands
 from config.config import SUPREME_ADMIN_ROLE_ID
-
-
-class _InteractionDedup:
-    """LRU-bounded set of interaction IDs used to block duplicate dispatches.
-
-    discord.py can dispatch the same interaction to a command handler multiple
-    times when commands exist in both global and guild trees.  This provides
-    a synchronous (no-await) check that catches duplicates before any response
-    is attempted, avoiding "interaction already acknowledged" errors.
-
-    The internal store is an ``OrderedDict`` used as an insertion-ordered set.
-    When it exceeds *maxsize* entries the oldest item is evicted (FIFO), which
-    keeps memory usage constant regardless of uptime.
-    """
-
-    def __init__(self, maxsize: int = 200):
-        """Initialise with a maximum cache size.
-
-        Parameters
-        ----------
-        maxsize:
-            The number of interaction IDs to retain before evicting the oldest.
-        """
-        self._seen: OrderedDict = OrderedDict()
-        self._maxsize = maxsize
-
-    def is_duplicate(self, interaction_id: int) -> bool:
-        """Return ``True`` if *interaction_id* was already recorded.
-
-        If the ID is new it is inserted into the cache (and the oldest entry
-        is evicted when the cache is full).
-        """
-        if interaction_id in self._seen:
-            return True
-        self._seen[interaction_id] = True
-        # Evict the oldest entry to keep memory bounded.
-        if len(self._seen) > self._maxsize:
-            self._seen.popitem(last=False)
-        return False
-
-
-# Module-level singleton so every cog that inherits BaseCog shares the same
-# dedup state.  This is safe because the bot runs in a single event loop.
-_dedup = _InteractionDedup()
 
 
 class BaseCog(commands.Cog):
@@ -71,7 +22,6 @@ class BaseCog(commands.Cog):
     Subclasses automatically get:
     * ``self.bot``   -- reference to the ``commands.Bot`` instance.
     * ``self.logger`` -- a ``logging.Logger`` under the ``'bot'`` namespace.
-    * ``is_duplicate_interaction()`` -- static dedup guard.
     * ``is_supreme_admin()``  -- role-based admin check.
     * ``check_voice_state()`` -- validates a user is in a voice channel and
       the channel has an acceptable number of human participants.
@@ -81,16 +31,6 @@ class BaseCog(commands.Cog):
         """Store bot reference and create a child logger for this cog."""
         self.bot = bot
         self.logger = logging.getLogger('bot')
-
-    @staticmethod
-    def is_duplicate_interaction(interaction: discord.Interaction) -> bool:
-        """Return ``True`` if this interaction has already been handled.
-
-        Must be called at the **very top** of every slash-command callback.
-        If it returns ``True`` the handler should return immediately without
-        sending a response (the first dispatch already replied).
-        """
-        return _dedup.is_duplicate(interaction.id)
 
     def is_supreme_admin(self, member: discord.Member) -> bool:
         """Check whether *member* holds the Supreme Admin role.

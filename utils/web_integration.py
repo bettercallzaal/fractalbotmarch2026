@@ -129,22 +129,6 @@ class WebIntegration:
         }
         return await self.send_webhook('fractal_complete', str(fractal_group.thread.id), data)
 
-    async def notify_fractal_paused(self, fractal_group) -> bool:
-        """Notify web app that a fractal session was paused mid-round."""
-        data = {
-            'currentLevel': fractal_group.current_level,
-            'pausedAt': fractal_group.current_level
-        }
-        return await self.send_webhook('fractal_paused', str(fractal_group.thread.id), data)
-
-    async def notify_fractal_resumed(self, fractal_group) -> bool:
-        """Notify web app that a paused fractal session was resumed."""
-        data = {
-            'currentLevel': fractal_group.current_level,
-            'resumedAt': fractal_group.current_level
-        }
-        return await self.send_webhook('fractal_resumed', str(fractal_group.thread.id), data)
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

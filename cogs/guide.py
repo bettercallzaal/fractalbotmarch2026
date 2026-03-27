@@ -21,28 +21,18 @@ import json
 import os
 import logging
 import time
-import aiohttp
 from cogs.base import BaseCog
 from config.config import RESPECT_POINTS
+from utils.blockchain import (
+    OG_RESPECT_ADDRESS, ZOR_RESPECT_ADDRESS, ZOR_TOKEN_ID,
+    query_erc20_balance, query_erc1155_balance,
+)
 
 # Resolve the absolute path to the shared data directory (project root / data)
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
 
 # JSON file mapping human-readable member names to their Ethereum wallet addresses
 NAMES_FILE = os.path.join(DATA_DIR, 'names_to_wallets.json')
-
-# ── Optimism contract addresses ──────────────────────────────────────────────
-# OG Respect is a standard ERC-20 token from the original fractal contract.
-OG_RESPECT_ADDRESS = '0x34cE89baA7E4a4B00E17F7E4C0cb97105C216957'
-
-# ZOR Respect is an ERC-1155 multi-token contract; all Respect lives under
-# token ID 0.
-ZOR_RESPECT_ADDRESS = '0x9885CCeEf7E8371Bf8d6f2413723D25917E7445c'
-ZOR_TOKEN_ID = 0
-
-# Fallback public RPC endpoint used when the ALCHEMY_OPTIMISM_RPC env var is
-# not set.  The Alchemy endpoint is preferred for reliability and rate limits.
-DEFAULT_OPTIMISM_RPC = 'https://mainnet.optimism.io'
 
 
 class GuideCog(BaseCog):
@@ -253,26 +243,23 @@ class GuideCog(BaseCog):
         if not entries:
             return []
 
-        # Prefer the Alchemy RPC if configured; fall back to the public endpoint
-        rpc_url = os.getenv('ALCHEMY_OPTIMISM_RPC', DEFAULT_OPTIMISM_RPC)
         results = []
 
         # Query each member's OG (ERC-20) + ZOR (ERC-1155) balance
         # sequentially to stay within RPC rate limits.
-        async with aiohttp.ClientSession() as session:
-            for name, wallet in entries:
-                og = await self._query_erc20(session, rpc_url, wallet, OG_RESPECT_ADDRESS)
-                zor = await self._query_erc1155(session, rpc_url, wallet, ZOR_RESPECT_ADDRESS, ZOR_TOKEN_ID)
-                total = og + zor
-                # Only include members who have earned at least some Respect
-                if total > 0:
-                    results.append({
-                        'name': name,
-                        'wallet': wallet,
-                        'og': og,
-                        'zor': zor,
-                        'total': total,
-                    })
+        for name, wallet in entries:
+            og = await query_erc20_balance(OG_RESPECT_ADDRESS, wallet)
+            zor = await query_erc1155_balance(ZOR_RESPECT_ADDRESS, wallet, ZOR_TOKEN_ID)
+            total = og + zor
+            # Only include members who have earned at least some Respect
+            if total > 0:
+                results.append({
+                    'name': name,
+                    'wallet': wallet,
+                    'og': og,
+                    'zor': zor,
+                    'total': total,
+                })
 
         # Sort descending by total Respect so highest earners appear first
         results.sort(key=lambda x: -x['total'])
@@ -289,105 +276,6 @@ class GuideCog(BaseCog):
         # TTL window can skip the on-chain queries entirely.
         self._lb_cache = {'data': top_10, 'timestamp': time.time()}
         return top_10
-
-    async def _query_erc20(self, session: aiohttp.ClientSession, rpc_url: str,
-                           wallet: str, contract: str) -> float:
-        """Query the ``balanceOf`` function on an ERC-20 contract.
-
-        Constructs the ABI-encoded calldata for ``balanceOf(address)``
-        (selector ``0x70a08231``) and converts the raw 256-bit result from
-        wei to a human-readable float (18 decimal places).
-
-        Args:
-            session: Reusable aiohttp session for connection pooling.
-            rpc_url: Optimism JSON-RPC endpoint URL.
-            wallet: The holder's Ethereum address (``0x``-prefixed).
-            contract: The ERC-20 contract address.
-
-        Returns:
-            The token balance as a float, or ``0.0`` on failure.
-        """
-        # Strip the 0x prefix and left-pad to 32 bytes (64 hex chars)
-        addr_padded = wallet[2:].lower().zfill(64)
-        # 0x70a08231 is the 4-byte function selector for balanceOf(address)
-        data = f"0x70a08231{addr_padded}"
-        result = await self._eth_call(session, rpc_url, contract, data)
-        # A valid ERC-20 balanceOf response is a 32-byte (64 hex char) uint256,
-        # prefixed with "0x" for a total length of at least 66 characters.
-        # Empty or error responses ("0x") are treated as zero balance.
-        if result and result != "0x" and len(result) >= 66:
-            # Convert from 18-decimal fixed-point to a float
-            return int(result, 16) / 1e18
-        return 0.0
-
-    async def _query_erc1155(self, session: aiohttp.ClientSession, rpc_url: str,
-                             wallet: str, contract: str, token_id: int) -> float:
-        """Query the ``balanceOf`` function on an ERC-1155 contract.
-
-        Constructs the ABI-encoded calldata for
-        ``balanceOf(address, uint256)`` (selector ``0x00fdd58e``).
-        Unlike ERC-20, ERC-1155 balances are whole integers (no decimals),
-        so the raw value is returned as-is (cast to float for consistency).
-
-        Args:
-            session: Reusable aiohttp session for connection pooling.
-            rpc_url: Optimism JSON-RPC endpoint URL.
-            wallet: The holder's Ethereum address (``0x``-prefixed).
-            contract: The ERC-1155 contract address.
-            token_id: The specific token ID to query (0 for ZOR Respect).
-
-        Returns:
-            The token balance as a float, or ``0.0`` on failure.
-        """
-        # ABI-encode the two arguments: address (32 bytes) and token ID (32 bytes)
-        addr_padded = wallet[2:].lower().zfill(64)
-        id_padded = hex(token_id)[2:].zfill(64)
-        # 0x00fdd58e is the 4-byte selector for balanceOf(address, uint256)
-        data = f"0x00fdd58e{addr_padded}{id_padded}"
-        result = await self._eth_call(session, rpc_url, contract, data)
-        # Same 66-char minimum check as ERC-20 (32-byte uint256 + "0x" prefix)
-        if result and result != "0x" and len(result) >= 66:
-            # ERC-1155 balances have no decimals; cast to float for uniformity
-            # with the ERC-20 return type so callers can simply add them.
-            return float(int(result, 16))
-        return 0.0
-
-    async def _eth_call(self, session: aiohttp.ClientSession, rpc_url: str,
-                        to: str, data: str) -> str:
-        """Execute a read-only ``eth_call`` against the Optimism JSON-RPC.
-
-        This is the low-level helper used by both ``_query_erc20`` and
-        ``_query_erc1155``.  It sends a single JSON-RPC request with a
-        10-second timeout and returns the hex-encoded result string.
-
-        Args:
-            session: Reusable aiohttp session for connection pooling.
-            rpc_url: The JSON-RPC endpoint URL.
-            to: The contract address to call.
-            data: ABI-encoded calldata (function selector + arguments).
-
-        Returns:
-            The hex-encoded return value from the contract, or ``"0x"``
-            if the call fails for any reason (network error, RPC error, etc.).
-        """
-        # Build a standard JSON-RPC 2.0 payload.  "latest" reads the most
-        # recent confirmed block on Optimism.
-        payload = {
-            "jsonrpc": "2.0", "id": 1, "method": "eth_call",
-            "params": [{"to": to, "data": data}, "latest"]
-        }
-        try:
-            # 10-second timeout guards against slow or unresponsive RPCs
-            async with session.post(rpc_url, json=payload,
-                                    timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                result = await resp.json()
-                # The "result" key holds the hex-encoded return data on success.
-                # On RPC-level errors the key may be missing; default to "0x".
-                return result.get("result", "0x")
-        except Exception as e:
-            # Log but don't raise -- callers treat "0x" as a zero balance
-            self.logger.error(f"eth_call failed for {to}: {e}")
-            return "0x"
 
 
 async def setup(bot):

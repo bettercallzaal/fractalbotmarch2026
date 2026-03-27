@@ -28,7 +28,7 @@ import asyncio
 import random
 import os
 from typing import Optional, List, Dict
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode
 from utils.web_integration import web_integration
 
 # Resolve the project-root assets/ directory (three levels up from this file: cogs/fractal/group.py)
@@ -120,22 +120,6 @@ class FractalGroup:
         # Start first round
         self.logger.info(f"Starting first round for '{self.thread.name}'")
         await self.start_new_round()
-
-    async def add_member(self, member: discord.Member):
-        """Add a late-joining member to the fractal group.
-
-        The member is added to both the full roster (self.members) and the
-        active candidate pool so they are eligible for future rounds. They
-        are also added to the Discord thread so they can see messages.
-
-        Args:
-            member: The Discord member to add. No-op if already present.
-        """
-        if member not in self.members:
-            self.members.append(member)
-            self.active_candidates.append(member)
-            await self.thread.add_user(member)
-            self.logger.info(f"Added {member.display_name} to fractal group '{self.thread.name}'")
 
     async def start_new_round(self, winner: Optional[discord.Member] = None):
         """Start a new voting round, optionally recording a previous winner.

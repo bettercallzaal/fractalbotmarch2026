@@ -46,6 +46,9 @@ class FractalHistory:
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE, 'r') as f:
                 self._data = json.load(f)
+        # Backwards compatibility: add next_id counter if missing
+        if 'next_id' not in self._data:
+            self._data['next_id'] = len(self._data['fractals']) + 1
 
     def _save(self):
         """Persist history atomically to prevent corruption."""
@@ -72,9 +75,9 @@ class FractalHistory:
         Returns:
             The newly created entry dict (includes an auto-incremented ``id``).
         """
-        # Auto-increment ID based on current list length (1-indexed)
+        # Auto-increment ID using a persistent counter (survives deletions)
         entry = {
-            'id': len(self._data['fractals']) + 1,
+            'id': self._data['next_id'],
             'group_name': group_name,
             'facilitator_id': str(facilitator_id),
             'facilitator_name': facilitator_name,
@@ -86,6 +89,7 @@ class FractalHistory:
             'completed_at': datetime.now(timezone.utc).isoformat()
         }
         self._data['fractals'].append(entry)
+        self._data['next_id'] += 1
         self._save()
         return entry
 
@@ -93,9 +97,9 @@ class FractalHistory:
         """Return every recorded fractal entry.
 
         Returns:
-            The full list of fractal entry dicts (not a copy).
+            A shallow copy of the full list of fractal entry dicts.
         """
-        return self._data['fractals']
+        return list(self._data['fractals'])
 
     def get_recent(self, count: int = 10) -> list[dict]:
         """Return the *count* most recent fractal entries.

@@ -40,33 +40,12 @@ STARTING_LEVEL = 6  # Highest rank awarded (most Respect)
 ENDING_LEVEL = 1    # Lowest rank awarded (least Respect)
 
 # ---------------------------------------------------------------------------
-# UI Settings
-# ---------------------------------------------------------------------------
-# Cycling button colour palette for interactive Discord views.
-# When there are more participants than colours, the palette wraps around.
-# Strings must match valid ``discord.ButtonStyle`` names.
-BUTTON_STYLES = [
-    'primary',   # Blue  -- maps to discord.ButtonStyle.primary
-    'success',   # Green -- maps to discord.ButtonStyle.success
-    'danger',    # Red   -- maps to discord.ButtonStyle.danger
-    'secondary'  # Gray  -- maps to discord.ButtonStyle.secondary
-]
-
-# ---------------------------------------------------------------------------
 # Respect Points (Year 2 = 2x Fibonacci)
 # ---------------------------------------------------------------------------
 # Respect tokens awarded by rank position.  Index 0 = 1st place (Level 6),
 # index 5 = 6th place (Level 1).  The distribution uses a doubled Fibonacci
 # sequence to incentivise top contributors while still rewarding participation.
 RESPECT_POINTS = [110, 68, 42, 26, 16, 10]
-
-# ---------------------------------------------------------------------------
-# Thread Settings
-# ---------------------------------------------------------------------------
-# Prefix prepended to every fractal discussion thread name.
-# The full thread title follows the pattern: "ZAO Fractal: <group members>".
-# This makes fractal threads easy to identify in the channel thread list.
-THREAD_PREFIX = "ZAO Fractal:"
 
 # ---------------------------------------------------------------------------
 # Channel IDs (Discord snowflakes)

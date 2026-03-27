@@ -30,6 +30,10 @@ import json
 import os
 import aiohttp
 from cogs.base import BaseCog
+from utils.blockchain import (
+    eth_call as _shared_eth_call,
+    is_wearer_of_hat as _shared_is_wearer_of_hat,
+)
 
 # ── Hats Protocol constants ──────────────────────────────────────────────────
 
@@ -39,14 +43,9 @@ HATS_CONTRACT = '0x3bc1A0Ad72417f2d411118085256fC53CBdDd137'
 # The ZAO's tree ID within the Hats Protocol registry
 ZAO_TREE_ID = 226
 
-# Fallback RPC endpoint for Optimism; overridden by ALCHEMY_OPTIMISM_RPC env var
-DEFAULT_OPTIMISM_RPC = 'https://mainnet.optimism.io'
-
 # ── Solidity function selectors (first 4 bytes of keccak256 hash) ─────────
 
 SELECTOR_VIEW_HAT = '0xd395acf8'         # viewHat(uint256)
-SELECTOR_IS_WEARER = '0x4352409a'        # isWearerOfHat(address,uint256)
-SELECTOR_GET_NEXT_ID = '0x1183a8c0'      # getNextId(uint256)
 
 # ── Cache TTLs ────────────────────────────────────────────────────────────────
 
@@ -60,11 +59,6 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 
 # JSON file storing admin-configured hat-to-Discord-role mappings
 HATS_ROLES_FILE = os.path.join(DATA_DIR, 'hats_roles.json')
-
-
-def _get_rpc_url() -> str:
-    """Return the Optimism JSON-RPC URL, preferring the Alchemy env var if set."""
-    return os.getenv('ALCHEMY_OPTIMISM_RPC', DEFAULT_OPTIMISM_RPC)
 
 
 def _top_hat_id(tree_id: int) -> int:
@@ -117,6 +111,9 @@ def _pad_address(addr: str) -> str:
 async def _eth_call(to: str, data: str) -> str:
     """Execute a read-only ``eth_call`` against the Optimism RPC.
 
+    Delegates to the shared ``utils.blockchain.eth_call`` helper so that
+    session management and RPC URL resolution are centralised.
+
     Args:
         to: The contract address to call (hex string with 0x prefix).
         data: ABI-encoded calldata (hex string with 0x prefix).
@@ -124,14 +121,7 @@ async def _eth_call(to: str, data: str) -> str:
     Returns:
         The hex-encoded return data from the contract, or ``"0x"`` on failure.
     """
-    payload = {
-        "jsonrpc": "2.0", "id": 1, "method": "eth_call",
-        "params": [{"to": to, "data": data}, "latest"]
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(_get_rpc_url(), json=payload) as resp:
-            result = await resp.json()
-            return result.get("result", "0x")
+    return await _shared_eth_call(to, data)
 
 
 async def _view_hat(hat_id: int) -> dict | None:
@@ -211,6 +201,10 @@ async def _view_hat(hat_id: int) -> dict | None:
 async def _is_wearer_of_hat(address: str, hat_id: int) -> bool:
     """Check if an Ethereum address is currently wearing a specific hat onchain.
 
+    Results are cached for ``WEARER_CACHE_TTL`` seconds (5 minutes) in the
+    module-level ``_wearer_cache`` dict to reduce redundant RPC calls during
+    the role-sync loop and ``/myhats`` command.
+
     Args:
         address: The 0x-prefixed Ethereum address to check.
         hat_id: The numeric hat ID to check against.
@@ -218,24 +212,19 @@ async def _is_wearer_of_hat(address: str, hat_id: int) -> bool:
     Returns:
         True if the address is an active wearer of the hat, False otherwise.
     """
-    data = SELECTOR_IS_WEARER + _pad_address(address) + _pad_uint256(hat_id)
-    result = await _eth_call(HATS_CONTRACT, data)
-    if result and len(result) >= 66:
-        return int(result, 16) != 0
-    return False
+    cache_key = (address.lower(), hat_id)
+    cached = _wearer_cache.get(cache_key)
+    if cached and time.time() - cached['timestamp'] < WEARER_CACHE_TTL:
+        return cached['result']
+
+    result = await _shared_is_wearer_of_hat(address, hat_id)
+    _wearer_cache[cache_key] = {'result': result, 'timestamp': time.time()}
+    return result
 
 
-async def _get_next_id(admin_hat_id: int) -> int:
-    """Get the next available child hat ID under a given admin (parent) hat.
-
-    Used to determine how many child hats exist beneath a parent in the tree.
-    Returns 0 if the call fails or no children exist.
-    """
-    data = SELECTOR_GET_NEXT_ID + _pad_uint256(admin_hat_id)
-    result = await _eth_call(HATS_CONTRACT, data)
-    if result and result != '0x' and len(result) >= 66:
-        return int(result, 16)
-    return 0
+# Module-level wearer cache shared across all callers of _is_wearer_of_hat.
+# Keyed by (wallet_lower, hat_id) -> {result: bool, timestamp: float}.
+_wearer_cache: dict = {}
 
 
 async def _fetch_ipfs_details(ipfs_uri: str) -> dict:
@@ -375,7 +364,6 @@ class HatsCog(BaseCog):
         self.role_mapping = HatsRoleMapping()
         self._tree_cache = None       # Cached list of tree node dicts
         self._tree_cache_time = 0     # Epoch timestamp of last tree fetch
-        self._wearer_cache = {}       # (wallet, hat_id) -> {result, timestamp}
 
     async def cog_load(self):
         """Called by discord.py when the cog is loaded; starts the periodic role sync."""

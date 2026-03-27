@@ -21,11 +21,9 @@ from discord.ext import commands
 import logging
 import random
 import math
-import asyncio
-from datetime import datetime, timezone
+from datetime import datetime
 from ..base import BaseCog
 from .views import MemberConfirmationView
-from .group import FractalGroup
 from config.config import INTROS_CHANNEL_ID
 
 
@@ -53,39 +51,6 @@ class FractalCog(BaseCog):
         # Tracks how many groups have been created per guild per day,
         # keyed as guild_id -> {date_string: count}
         self.daily_counters = {}
-        # Async lock to prevent race conditions when multiple commands
-        # concurrently mutate active_groups
-        self._groups_lock = asyncio.Lock()
-
-        # Placeholder for a Discord app-command group (not currently mounted)
-        self.admin_group = app_commands.Group(name="admin", description="Admin commands for fractal management")
-
-    def _get_next_group_name(self, guild_id: int) -> str:
-        """Return a unique, human-readable group name for today's date.
-
-        Names follow the pattern ``Fractal Group <n> - <date>`` where *n*
-        auto-increments each time a new group is created in the same guild on
-        the same calendar day.  The counter resets implicitly when a new date
-        string appears.
-
-        Args:
-            guild_id: The Discord guild snowflake to scope the counter.
-
-        Returns:
-            A formatted group name string.
-        """
-        today = datetime.now().strftime("%b %d, %Y")
-
-        if guild_id not in self.daily_counters:
-            self.daily_counters[guild_id] = {}
-
-        if today not in self.daily_counters[guild_id]:
-            self.daily_counters[guild_id][today] = 0
-
-        self.daily_counters[guild_id][today] += 1
-        counter = self.daily_counters[guild_id][today]
-
-        return f"Fractal Group {counter} - {today}"
 
     # ------------------------------------------------------------------
     # Primary user-facing commands
@@ -181,7 +146,7 @@ class FractalCog(BaseCog):
         confirm_msg = "\n".join(lines)
 
         # Present the confirmation view; the facilitator clicks Start to proceed
-        view = MemberConfirmationView(self, members, interaction.user, custom_name=custom_name)
+        view = MemberConfirmationView(self, members, interaction.user)
         try:
             await interaction.followup.send(confirm_msg, view=view, ephemeral=True)
         except (discord.NotFound, discord.HTTPException) as e:

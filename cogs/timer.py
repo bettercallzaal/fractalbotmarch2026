@@ -28,7 +28,7 @@ Flow:
 
 import discord
 from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 import logging
 import asyncio
 import time
@@ -72,6 +72,7 @@ class PresentationTimer:
         self.end_timestamp: int = 0
         self.skipped: list[discord.Member] = []  # Members deferred to come back later
         self._countdown_task: asyncio.Task | None = None  # Track active countdown
+        self._remaining_when_paused = 0
         self.logger = logging.getLogger('bot')
 
         # Interactive reactions — unlike Discord's native reactions, these are
@@ -770,9 +771,6 @@ class TimerCog(BaseCog):
         slow work (intro lookup, embed building) happens after deferring.
         """
         self.logger.info(f"[TIMER] handler called: interaction={interaction.id} user={interaction.user}")
-        if self.is_duplicate_interaction(interaction):
-            self.logger.warning(f"[TIMER] BLOCKED by BaseCog dedup: {interaction.id}")
-            return
 
         # --- Fast validation (direct response, no defer needed) ---
         voice_check = await self.check_voice_state(interaction.user)

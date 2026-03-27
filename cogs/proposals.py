@@ -8,8 +8,8 @@ by each voter's on-chain Respect token balance (queried from the Optimism networ
 ensuring that voting power reflects community standing.
 
 Key components:
-    - RespectBalance: Queries OG Respect (ERC-20) and ZOR Respect (ERC-1155) balances
-      from the Optimism blockchain, with a 5-minute TTL cache to reduce RPC calls.
+    - _get_cached_respect: Thin caching wrapper around ``utils.blockchain.get_total_respect``
+      that maintains a 5-minute TTL cache to reduce RPC calls for vote-weight lookups.
     - ProposalStore: A JSON-file-backed data store that handles creation, retrieval,
       voting, closing, and deletion of proposals. All mutations are atomically saved.
     - ProposalVoteView / GovernanceVoteView: Persistent Discord UI button views that
@@ -37,10 +37,10 @@ import re
 import html
 import logging
 import time
-import aiohttp
 from datetime import datetime, timedelta, timezone
 from cogs.base import BaseCog
 from config.config import PROPOSAL_TYPES, MAX_PROPOSAL_OPTIONS, PROPOSALS_CHANNEL_ID
+from utils.blockchain import get_total_respect
 
 # Path to the JSON file that persists all proposal data between bot restarts
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
@@ -65,136 +65,42 @@ def _parse_utc(iso_str: str) -> datetime:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
 
-# ── On-chain contract addresses on Optimism mainnet ──
-# OG Respect is an ERC-20 token (18 decimals) representing legacy community standing
-OG_RESPECT_ADDRESS = '0x34cE89baA7E4a4B00E17F7E4C0cb97105C216957'
-# ZOR Respect is an ERC-1155 token (token ID 0, no decimals) for newer respect scores
-ZOR_RESPECT_ADDRESS = '0x9885CCeEf7E8371Bf8d6f2413723D25917E7445c'
-ZOR_TOKEN_ID = 0
-
-# Default public Optimism RPC; can be overridden via ALCHEMY_OPTIMISM_RPC env var
-DEFAULT_OPTIMISM_RPC = 'https://mainnet.optimism.io'
-
 # ── Embed display constants ──
 # Maps proposal type keys to emoji and human-readable labels for Discord embeds
 TYPE_EMOJIS = {'text': '\U0001f4dd', 'governance': '\u2696\ufe0f', 'funding': '\U0001f4b0', 'curate': '\U0001f3a8'}
 TYPE_LABELS = {'text': 'Text', 'governance': 'Governance', 'funding': 'Funding', 'curate': 'Curation'}
 
+# ── Respect balance cache ──
+# In-memory cache keyed by lowercase wallet address.
+# Each entry stores {total, timestamp} to avoid redundant RPC calls.
+_respect_cache: dict = {}
+_RESPECT_CACHE_TTL = 300  # 5 minutes
 
-class RespectBalance:
-    """Queries on-chain Respect token balances from the Optimism network with caching.
 
-    Supports two token contracts:
-        - OG Respect (ERC-20, 18 decimals) at ``OG_RESPECT_ADDRESS``
-        - ZOR Respect (ERC-1155, token ID 0, integer) at ``ZOR_RESPECT_ADDRESS``
+async def _get_cached_respect(wallet: str) -> float:
+    """Get total Respect for a wallet, with a 5-minute TTL cache.
 
-    Balances are cached in memory for 5 minutes (configurable via ``_cache_ttl``)
-    to avoid hitting the RPC endpoint on every vote. A single module-level
-    instance (``_respect_balance``) is shared across all voting interactions.
+    Delegates the actual on-chain query to ``utils.blockchain.get_total_respect``
+    but wraps it in a local cache so repeated votes within a short window
+    do not trigger additional RPC calls.
+
+    Returns 0.0 if the wallet is empty, not found, or if any RPC call fails.
     """
-
-    def __init__(self):
-        self.logger = logging.getLogger('bot')
-        # In-memory cache keyed by lowercase wallet address.
-        # Each entry stores {og, zor, total, timestamp} to avoid redundant RPC calls.
-        self._cache = {}
-        self._cache_ttl = 300  # Cache entries expire after 5 minutes
-
-    def _get_rpc_url(self) -> str:
-        """Return the Optimism RPC URL, preferring a user-supplied Alchemy key."""
-        return os.getenv('ALCHEMY_OPTIMISM_RPC', DEFAULT_OPTIMISM_RPC)
-
-    async def get_total_respect(self, wallet: str) -> float:
-        """Get total Respect (OG + ZOR) for a wallet, with caching.
-
-        The total is the sum of the user's OG Respect (ERC-20, 18 decimals)
-        and ZOR Respect (ERC-1155, integer). Results are cached for 5 minutes
-        to avoid hitting the RPC on every vote.
-
-        Returns 0.0 if the wallet is empty, not found, or if any RPC call fails.
-        """
-        if not wallet:
-            return 0.0
-
-        wallet = wallet.lower()
-        # Return cached value if it hasn't expired
-        cached = self._cache.get(wallet)
-        if cached and time.time() - cached['timestamp'] < self._cache_ttl:
-            return cached['total']
-
-        try:
-            # Query both token contracts in sequence and sum the balances
-            og = await self._query_erc20_balance(wallet, OG_RESPECT_ADDRESS)
-            zor = await self._query_erc1155_balance(wallet, ZOR_RESPECT_ADDRESS, ZOR_TOKEN_ID)
-            total = og + zor
-
-            self._cache[wallet] = {
-                'og': og, 'zor': zor, 'total': total,
-                'timestamp': time.time()
-            }
-            return total
-        except Exception as e:
-            self.logger.error(f"Failed to query Respect for {wallet}: {e}")
-            return 0.0
-
-    async def _eth_call(self, to: str, data: str) -> str:
-        """Execute a read-only eth_call against an Optimism smart contract.
-
-        Sends a JSON-RPC ``eth_call`` request to the configured Optimism RPC
-        endpoint. This is a read-only operation that does not create a
-        transaction or cost gas.
-
-        Args:
-            to: The contract address to call (checksummed or lowercase hex).
-            data: The ABI-encoded call data (function selector + arguments).
-
-        Returns:
-            The hex-encoded return value from the contract, or "0x" on failure.
-        """
-        payload = {
-            "jsonrpc": "2.0", "id": 1, "method": "eth_call",
-            "params": [{"to": to, "data": data}, "latest"]
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(self._get_rpc_url(), json=payload) as resp:
-                result = await resp.json()
-                return result.get("result", "0x")
-
-    async def _query_erc20_balance(self, wallet: str, contract: str) -> float:
-        """Query ERC-20 balanceOf -- returns balance as float (18 decimals).
-
-        Constructs the ABI-encoded call data for ``balanceOf(address)``
-        (selector 0x70a08231) with the wallet address zero-padded to 32 bytes.
-        """
-        # Strip '0x' prefix and left-pad the address to 32 bytes for ABI encoding
-        addr_padded = wallet[2:].lower().zfill(64)
-        data = f"0x70a08231{addr_padded}"
-        result = await self._eth_call(contract, data)
-        if result and result != "0x" and len(result) >= 66:
-            raw = int(result, 16)
-            return raw / 1e18  # Convert from wei-like 18-decimal representation
+    if not wallet:
         return 0.0
 
-    async def _query_erc1155_balance(self, wallet: str, contract: str, token_id: int) -> float:
-        """Query ERC-1155 balanceOf -- returns balance as integer (no decimals).
+    wallet = wallet.lower()
+    cached = _respect_cache.get(wallet)
+    if cached and time.time() - cached['timestamp'] < _RESPECT_CACHE_TTL:
+        return cached['total']
 
-        Constructs ABI-encoded call data for ``balanceOf(address, uint256)``
-        (selector 0x00fdd58e) with the wallet address and token ID each
-        zero-padded to 32 bytes.
-        """
-        # ABI-encode both arguments: address and token ID, each as 32-byte words
-        addr_padded = wallet[2:].lower().zfill(64)
-        id_padded = hex(token_id)[2:].zfill(64)
-        data = f"0x00fdd58e{addr_padded}{id_padded}"
-        result = await self._eth_call(contract, data)
-        if result and result != "0x" and len(result) >= 66:
-            return float(int(result, 16))
+    try:
+        total = await get_total_respect(wallet)
+        _respect_cache[wallet] = {'total': total, 'timestamp': time.time()}
+        return total
+    except Exception as e:
+        logging.getLogger('bot').error(f"Failed to query Respect for {wallet}: {e}")
         return 0.0
-
-
-# Module-level singleton so the in-memory cache is shared across all vote
-# interactions throughout the bot's lifetime.
-_respect_balance = RespectBalance()
 
 
 async def _get_vote_weight(bot, user: discord.User) -> float:
@@ -211,7 +117,7 @@ async def _get_vote_weight(bot, user: discord.User) -> float:
     if not wallet:
         return 0.0
 
-    return await _respect_balance.get_total_respect(wallet)
+    return await _get_cached_respect(wallet)
 
 
 async def _scrape_og_tags(url: str) -> dict:
@@ -240,25 +146,25 @@ async def _scrape_og_tags(url: str) -> dict:
                                    headers={'User-Agent': 'Mozilla/5.0 (compatible; ZAOBot/1.0)'}) as resp:
                 if resp.status != 200:
                     return result
-                html = await resp.text()
+                page_html = await resp.text()
                 # Extract each OG tag we care about via regex (avoids a full HTML parser dependency)
                 for tag in ['title', 'description', 'image']:
                     # Try standard attribute order: property/name first, then content
                     match = re.search(
                         rf'<meta\s+(?:property|name)=["\']og:{tag}["\']\s+content=["\']([^"\']+)["\']',
-                        html, re.IGNORECASE
+                        page_html, re.IGNORECASE
                     )
                     if not match:
                         # Some sites put content before property -- try reversed order
                         match = re.search(
                             rf'<meta\s+content=["\']([^"\']+)["\']\s+(?:property|name)=["\']og:{tag}["\']',
-                            html, re.IGNORECASE
+                            page_html, re.IGNORECASE
                         )
                     if match:
                         # Unescape HTML entities like &amp; in the extracted value
                         result[tag] = html.unescape(match.group(1))
-    except Exception:
-        pass  # Silently return empty dict -- scraping is best-effort only
+    except Exception as e:
+        logging.getLogger('bot.proposals').error(f"Error scraping OG tags from {url}: {e}")
     return result
 
 
@@ -913,6 +819,42 @@ class ProposalsCog(BaseCog):
         self._catchup_expiry.start()
         self._migrate_buttons.start()
 
+    async def _close_and_notify(self, proposal):
+        """Close a proposal, update its embed, and post final results to its thread.
+
+        Shared helper used by both _catchup_expiry and _expire_proposals to
+        avoid duplicating the close-update-notify logic. Assumes the proposal
+        is already confirmed to be expired.
+
+        Args:
+            proposal: The proposal dict to close.
+        """
+        pid = proposal['id']
+        self.store.close(pid)
+        # Update the embed to reflect closed status (best-effort)
+        try:
+            await _update_proposal_embed(self.bot, self.store, self.store.get(pid))
+        except Exception as e:
+            self.logger.error(f"Failed to update embed for expired proposal #{pid}: {e}")
+        # Post a closure notice with final results to the proposal thread
+        try:
+            thread = self.bot.get_channel(int(proposal['thread_id']))
+            if not thread:
+                thread = await self.bot.fetch_channel(int(proposal['thread_id']))
+            if thread:
+                # Build a sorted results summary, highest Respect weight first
+                summary = self.store.get_vote_summary(pid)
+                result_lines = []
+                for option, data in sorted(summary.items(), key=lambda x: x[1]['weight'], reverse=True):
+                    result_lines.append(f"**{option.upper()}**: {data['count']} votes ({data['weight']:,.0f} Respect)")
+                result_text = "\n".join(result_lines) if result_lines else "No votes cast."
+                await thread.send(
+                    f"⏰ **Voting has closed** (7-day limit reached)\n\n"
+                    f"**Final Results:**\n{result_text}"
+                )
+        except Exception as e:
+            self.logger.error(f"Error posting closure for proposal #{pid}: {e}")
+
     @tasks.loop(count=1)
     async def _catchup_expiry(self):
         """Immediately close any overdue proposals on startup (don't wait for hourly loop).
@@ -928,34 +870,9 @@ class ProposalsCog(BaseCog):
             try:
                 created = _parse_utc(proposal['created_at'])
                 if now - created >= timedelta(days=7):
-                    # Mark as closed in the store first (prevents further votes)
-                    self.store.close(proposal['id'])
+                    await self._close_and_notify(proposal)
                     expired_count += 1
                     self.logger.info(f"Startup expiry: closed proposal #{proposal['id']}")
-                    # Update the embed to reflect closed status (best-effort)
-                    try:
-                        await _update_proposal_embed(self.bot, self.store, self.store.get(proposal['id']))
-                    except Exception as e:
-                        self.logger.error(f"Failed to update embed for expired proposal #{proposal['id']}: {e}")
-                    # Post a closure notice with final results to the proposal thread
-                    try:
-                        thread = self.bot.get_channel(int(proposal['thread_id']))
-                        if not thread:
-                            # Thread may not be in cache; try fetching from Discord API
-                            thread = await self.bot.fetch_channel(int(proposal['thread_id']))
-                        if thread:
-                            # Build a sorted results summary, highest Respect weight first
-                            summary = self.store.get_vote_summary(proposal['id'])
-                            result_lines = []
-                            for option, data in sorted(summary.items(), key=lambda x: x[1]['weight'], reverse=True):
-                                result_lines.append(f"**{option.upper()}**: {data['count']} votes ({data['weight']:,.0f} Respect)")
-                            result_text = "\n".join(result_lines) if result_lines else "No votes cast."
-                            await thread.send(
-                                f"⏰ **Voting has closed** (7-day limit reached)\n\n"
-                                f"**Final Results:**\n{result_text}"
-                            )
-                    except Exception as e:
-                        self.logger.error(f"Error posting startup closure for proposal #{proposal['id']}: {e}")
             except Exception as e:
                 # Catch per-proposal errors so one bad proposal doesn't block others
                 self.logger.error(f"Error in startup expiry for proposal #{proposal.get('id', '?')}: {e}")
@@ -1010,7 +927,7 @@ class ProposalsCog(BaseCog):
     async def _expire_proposals(self):
         """Hourly background task: close any active proposals older than 7 days.
 
-        For each expired proposal, this task:
+        For each expired proposal, this task delegates to _close_and_notify which:
         1. Marks the proposal as 'closed' in the store.
         2. Updates the proposal embed to show final results and "closed" status.
         3. Posts a closure notice with the final vote tally in the proposal thread.
@@ -1022,32 +939,8 @@ class ProposalsCog(BaseCog):
                 created = _parse_utc(proposal['created_at'])
                 # Check if the 7-day voting window has elapsed
                 if now - created >= timedelta(days=7):
-                    # Mark as closed in the store (prevents further votes)
-                    self.store.close(proposal['id'])
+                    await self._close_and_notify(proposal)
                     self.logger.info(f"Auto-closed proposal #{proposal['id']} after 7 days")
-                    # Refresh the embed to show "closed" status instead of active voting window
-                    try:
-                        await _update_proposal_embed(self.bot, self.store, self.store.get(proposal['id']))
-                    except Exception as e:
-                        self.logger.error(f"Failed to update embed for expired proposal #{proposal['id']}: {e}")
-                    # Post a human-readable closure notice with the final vote tally
-                    try:
-                        thread = self.bot.get_channel(int(proposal['thread_id']))
-                        if not thread:
-                            thread = await self.bot.fetch_channel(int(proposal['thread_id']))
-                        if thread:
-                            # Sort results by Respect weight (descending) for readability
-                            summary = self.store.get_vote_summary(proposal['id'])
-                            result_lines = []
-                            for option, data in sorted(summary.items(), key=lambda x: x[1]['weight'], reverse=True):
-                                result_lines.append(f"**{option.upper()}**: {data['count']} votes ({data['weight']:,.0f} Respect)")
-                            result_text = "\n".join(result_lines) if result_lines else "No votes cast."
-                            await thread.send(
-                                f"⏰ **Voting has closed** (7-day limit reached)\n\n"
-                                f"**Final Results:**\n{result_text}"
-                            )
-                    except Exception as e:
-                        self.logger.error(f"Error posting closure for proposal #{proposal['id']}: {e}")
             except Exception as e:
                 # Per-proposal error isolation: one failure doesn't block other expirations
                 self.logger.error(f"Error processing expiry for proposal #{proposal.get('id', '?')}: {e}")
@@ -1159,8 +1052,9 @@ class ProposalsCog(BaseCog):
         app_commands.Choice(name="Governance", value="governance"),
         app_commands.Choice(name="Funding", value="funding"),
     ])
-    async def propose(self, interaction: discord.Interaction, title: str,
-                      description: str,
+    async def propose(self, interaction: discord.Interaction,
+                      title: app_commands.Range[str, 1, 100],
+                      description: app_commands.Range[str, 1, 4000],
                       proposal_type: app_commands.Choice[str] | None = None,
                       amount: float | None = None):
         """Slash command entry point: create a new proposal for community voting.
@@ -1737,11 +1631,19 @@ class ProposalsCog(BaseCog):
                 self.store._data['proposals'][pid] = proposal
                 recovered.append(f"#{pid} — {title[:50]} ({status})")
 
-                # Only register a voting view for still-active proposals; skip
-                # embed edits during recovery to keep the operation fast.
+                # Register voting view and update message buttons for active proposals.
+                # Editing the message is essential: the original buttons have the old
+                # custom_id from when the proposal was first created, but the recovered
+                # proposal has a new ID.  Without re-editing, button clicks fail with
+                # "This interaction failed" because Discord sends the old custom_id.
                 if status == 'active':
                     view = ProposalVoteView(self.store, pid, bot=self.bot)
                     self.bot.add_view(view, message_id=bot_message.id)
+                    try:
+                        new_embed = _build_proposal_embed(proposal, self.store)
+                        await bot_message.edit(embed=new_embed, view=view)
+                    except Exception as e:
+                        self.logger.error(f"Failed to update buttons for recovered proposal #{pid}: {e}")
 
             except Exception as e:
                 errors.append(f"{thread.name[:40]}: {str(e)[:60]}")

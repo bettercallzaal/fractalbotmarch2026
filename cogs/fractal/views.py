@@ -18,7 +18,6 @@ via Discord's component-based interaction model (buttons and modals).
 
 import discord
 import logging
-from typing import Callable, Dict, List
 from .group import FractalGroup
 from config.config import FRACTAL_BOT_CHANNEL_ID
 
@@ -276,26 +275,19 @@ class MemberConfirmationView(discord.ui.View):
         members (list[discord.Member]): The list of members who will participate.
         facilitator (discord.Member): The user who initiated the fractal and has
             exclusive control over the confirmation buttons.
-        custom_name (str | None): An optional custom name for the fractal group
-            (currently unused in favor of the modal-based naming flow).
-        awaiting_modification (bool): Flag set to True when the facilitator clicks
-            "Modify Members", signaling the cog to listen for add/remove commands.
     """
-    def __init__(self, cog, members, facilitator, custom_name=None):
+    def __init__(self, cog, members, facilitator):
         """Initialize the confirmation view.
 
         Args:
             cog: The Fractal cog instance.
             members (list[discord.Member]): Initial list of group members.
             facilitator (discord.Member): The user who will control this view.
-            custom_name (str | None): Optional custom name for the group.
         """
         super().__init__(timeout=120)  # Auto-expire after 2 minutes of inactivity
         self.cog = cog
         self.members = members
         self.facilitator = facilitator
-        self.custom_name = custom_name
-        self.awaiting_modification = False  # Toggled when facilitator requests member changes
 
     @discord.ui.button(label="✅ Start Fractal", style=discord.ButtonStyle.success)
     async def confirm_members(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -321,9 +313,7 @@ class MemberConfirmationView(discord.ui.View):
     async def modify_members(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle the 'Modify Members' button click by enabling member modification mode.
 
-        Sends the facilitator instructions on how to add or remove members, then
-        sets the awaiting_modification flag so the cog knows to process subsequent
-        messages as member list changes rather than normal chat.
+        Sends the facilitator instructions on how to add or remove members.
 
         Only the facilitator is allowed to modify the member list.
 
@@ -343,5 +333,3 @@ class MemberConfirmationView(discord.ui.View):
             "• Then click ✅ to start",
             ephemeral=True
         )
-        # Signal the cog to interpret the facilitator's next messages as member modifications
-        self.awaiting_modification = True
