@@ -2,13 +2,13 @@
 Intro cog for the ZAO Fractal Discord bot.
 
 Provides slash commands to look up member introductions posted in the
-#intros channel. Introductions are cached locally in a JSON file so that
-repeated lookups do not require re-scanning channel history. An admin
-command is available to rebuild the entire cache from scratch.
+#intros channel. Introductions are stored in the Supabase ``intros`` table
+so that repeated lookups do not require re-scanning channel history. An
+admin command is available to rebuild the entire cache from scratch.
 
 Key components:
     - slugify(): Converts display names to URL-safe slugs for thezao.com links.
-    - IntroCache: JSON-backed in-memory cache mapping Discord user IDs to their
+    - IntroCache: Supabase-backed cache mapping Discord user IDs to their
       introduction text, message ID, and timestamp.
     - IntroCog: Discord cog exposing /intro and /admin_refresh_intros commands.
 """
@@ -16,18 +16,11 @@ Key components:
 import discord
 from discord import app_commands
 from discord.ext import commands
-import json
-import os
 import re
 from datetime import datetime
 from cogs.base import BaseCog
 from config.config import INTROS_CHANNEL_ID
-
-# Resolve the path to the persistent data directory (project_root/data/)
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-
-# File path for the JSON-backed intro cache
-INTROS_FILE = os.path.join(DATA_DIR, 'intros.json')
+from utils.supabase_client import get_supabase
 
 
 def slugify(name: str) -> str:
@@ -59,38 +52,33 @@ def slugify(name: str) -> str:
 
 
 class IntroCache:
-    """JSON-backed cache of member introductions from the #intros channel.
+    """Supabase-backed cache of member introductions from the #intros channel.
 
-    Stores each member's first non-empty message from the #intros channel,
-    keyed by their Discord user ID (as a string). The backing file is written
-    atomically on every mutation to avoid data corruption.
+    Stores each member's first non-empty message from the #intros channel
+    in the ``intros`` Supabase table, keyed by their Discord user ID.
 
-    Cache structure (in-memory and on disk):
+    Public methods return data in the same dict format the command handlers
+    expect::
+
         {
-            "<discord_user_id>": {
-                "text": "<intro message content>",
-                "message_id": <Discord message snowflake>,
-                "timestamp": "<ISO-8601 datetime string>"
-            },
-            ...
+            "text": "<intro message content>",
+            "message_id": <Discord message snowflake (int or str)>,
+            "timestamp": "<ISO-8601 datetime string>"
         }
     """
 
     def __init__(self):
-        """Initialise an empty cache dict and load any persisted data from disk."""
-        self._cache = {}  # discord_id (str) -> {text, message_id, timestamp}
-        self._load()
+        """Initialise with a Supabase client."""
+        self.sb = get_supabase()
 
-    def _load(self):
-        """Load the intro cache from disk if the file exists."""
-        if os.path.exists(INTROS_FILE):
-            with open(INTROS_FILE, 'r') as f:
-                self._cache = json.load(f)
-
-    def _save(self):
-        """Persist the current cache to disk using an atomic write."""
-        from utils.safe_json import atomic_save
-        atomic_save(INTROS_FILE, self._cache)
+    @staticmethod
+    def _row_to_entry(row: dict) -> dict:
+        """Convert a Supabase ``intros`` row to the legacy cache format."""
+        return {
+            "text": row["intro_text"],
+            "message_id": int(row["message_id"]) if row.get("message_id") else None,
+            "timestamp": row.get("posted_at", row.get("cached_at", "")),
+        }
 
     def get(self, discord_id: int) -> dict | None:
         """Retrieve a cached intro entry by Discord user ID.
@@ -102,10 +90,19 @@ class IntroCache:
             A dict with 'text', 'message_id', and 'timestamp' keys,
             or None if no intro is cached for this user.
         """
-        return self._cache.get(str(discord_id))
+        result = (
+            self.sb.table("intros")
+            .select("*")
+            .eq("discord_id", str(discord_id))
+            .maybe_single()
+            .execute()
+        )
+        if result.data:
+            return self._row_to_entry(result.data)
+        return None
 
     def set(self, discord_id: int, text: str, message_id: int, timestamp: str):
-        """Store or update an intro entry and persist to disk.
+        """Store or update an intro entry in Supabase.
 
         Args:
             discord_id: The Discord user's snowflake ID.
@@ -113,22 +110,29 @@ class IntroCache:
             message_id: The Discord message snowflake ID.
             timestamp: ISO-8601 formatted creation timestamp.
         """
-        self._cache[str(discord_id)] = {
-            'text': text,
-            'message_id': message_id,
-            'timestamp': timestamp
-        }
-        self._save()
+        self.sb.table("intros").upsert(
+            {
+                "discord_id": str(discord_id),
+                "intro_text": text,
+                "message_id": str(message_id),
+                "posted_at": timestamp,
+            },
+            on_conflict="discord_id",
+        ).execute()
 
     def clear(self):
-        """Remove all cached entries and persist the empty state."""
-        self._cache = {}
-        self._save()
+        """Remove all cached entries from Supabase."""
+        self.sb.table("intros").delete().neq("id", 0).execute()
 
     @property
     def size(self) -> int:
         """Return the number of cached introductions."""
-        return len(self._cache)
+        result = (
+            self.sb.table("intros")
+            .select("id", count="exact")
+            .execute()
+        )
+        return result.count or 0
 
 
 class IntroCog(BaseCog):

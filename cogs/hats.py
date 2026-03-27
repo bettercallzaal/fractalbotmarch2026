@@ -16,7 +16,7 @@ Key components:
       ABI-encode calls, send them to the Optimism RPC, and decode responses.
     - _fetch_ipfs_details / _ipfs_to_http: Resolve IPFS URIs to retrieve hat
       metadata (name, description, image).
-    - HatsRoleMapping: JSON-backed store of hat-ID-to-Discord-role mappings.
+    - HatsRoleMapping: Supabase-backed store of hat-ID-to-Discord-role mappings.
     - HatsCog: Discord cog exposing /hats, /hat, /myhats, /claimhat, and
       admin commands for managing role sync.
 """
@@ -24,9 +24,9 @@ Key components:
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+import json
 import logging
 import time
-import json
 import os
 import aiohttp
 from cogs.base import BaseCog
@@ -34,6 +34,7 @@ from utils.blockchain import (
     eth_call as _shared_eth_call,
     is_wearer_of_hat as _shared_is_wearer_of_hat,
 )
+from utils.supabase_client import get_supabase
 
 # ── Hats Protocol constants ──────────────────────────────────────────────────
 
@@ -51,15 +52,6 @@ SELECTOR_VIEW_HAT = '0xd395acf8'         # viewHat(uint256)
 
 TREE_CACHE_TTL = 600   # Seconds to cache the full hat tree (10 minutes)
 WEARER_CACHE_TTL = 300  # Seconds to cache individual wearer checks (5 minutes)
-
-# ── File paths ────────────────────────────────────────────────────────────────
-
-# Resolve the path to the persistent data directory (project_root/data/)
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-
-# JSON file storing admin-configured hat-to-Discord-role mappings
-HATS_ROLES_FILE = os.path.join(DATA_DIR, 'hats_roles.json')
-
 
 def _top_hat_id(tree_id: int) -> int:
     """Compute the top hat ID for a given tree.
@@ -282,57 +274,50 @@ def _ipfs_to_http(uri: str) -> str | None:
 
 
 class HatsRoleMapping:
-    """JSON-backed store mapping onchain hat IDs to Discord role IDs.
+    """Supabase-backed store mapping onchain hat IDs to Discord role IDs.
 
     Admins configure these mappings via /admin_link_hat.  The background
     sync loop in HatsCog reads them to decide which Discord roles to
     grant or revoke based on hat ownership.
-
-    Data structure on disk (hats_roles.json):
-        {
-            "<hat_id_hex>": {
-                "role_id": <Discord role snowflake>,
-                "hat_name": "<human-readable hat name>"
-            },
-            ...
-        }
     """
 
     def __init__(self):
-        """Initialise an empty mapping dict and load any persisted data from disk."""
-        self._data = {}  # hat_id_hex -> {role_id, hat_name}
-        self._load()
-
-    def _load(self):
-        """Load mappings from disk if the file exists."""
-        if os.path.exists(HATS_ROLES_FILE):
-            with open(HATS_ROLES_FILE, 'r') as f:
-                self._data = json.load(f)
-
-    def _save(self):
-        """Persist mappings atomically to prevent corruption."""
-        from utils.safe_json import atomic_save
-        atomic_save(HATS_ROLES_FILE, self._data)
+        """Initialise the Supabase client for hat-role mappings."""
+        self._supabase = get_supabase()
 
     def set(self, hat_id_hex: str, role_id: int, hat_name: str):
-        """Create or update a hat-to-role mapping and persist to disk."""
-        self._data[hat_id_hex] = {'role_id': role_id, 'hat_name': hat_name}
-        self._save()
+        """Create or update a hat-to-role mapping in Supabase."""
+        self._supabase.table("hats_role_mappings").upsert(
+            {"hat_id_hex": hat_id_hex, "role_id": role_id, "hat_name": hat_name},
+            on_conflict="hat_id_hex",
+        ).execute()
 
     def remove(self, hat_id_hex: str):
-        """Remove a hat-to-role mapping if it exists and persist to disk."""
-        if hat_id_hex in self._data:
-            del self._data[hat_id_hex]
-            self._save()
+        """Remove a hat-to-role mapping if it exists."""
+        self._supabase.table("hats_role_mappings").delete().eq(
+            "hat_id_hex", hat_id_hex
+        ).execute()
 
     def get_all(self) -> dict:
-        """Return a shallow copy of all mappings."""
-        return self._data.copy()
+        """Return all mappings as a dict keyed by hat_id_hex.
+
+        Returns the same format the rest of the code expects:
+            { "<hat_id_hex>": {"role_id": <int>, "hat_name": "<str>"}, ... }
+        """
+        result = self._supabase.table("hats_role_mappings").select("*").execute()
+        return {
+            row["hat_id_hex"]: {"role_id": row["role_id"], "hat_name": row["hat_name"]}
+            for row in (result.data or [])
+        }
 
     def get_role_id(self, hat_id_hex: str) -> int | None:
         """Look up the Discord role ID for a given hat, or None if unmapped."""
-        entry = self._data.get(hat_id_hex)
-        return entry['role_id'] if entry else None
+        result = self._supabase.table("hats_role_mappings").select(
+            "role_id"
+        ).eq("hat_id_hex", hat_id_hex).execute()
+        if result.data:
+            return result.data[0]["role_id"]
+        return None
 
 
 class HatsCog(BaseCog):

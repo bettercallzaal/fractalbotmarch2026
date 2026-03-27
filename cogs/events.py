@@ -19,20 +19,12 @@ Background task:
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-import json
-import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from cogs.base import BaseCog
 from config.config import FRACTAL_BOT_CHANNEL_ID
-from utils.safe_json import atomic_save
-
-# ---------------------------------------------------------------------------
-# Data file path
-# ---------------------------------------------------------------------------
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-EVENTS_FILE = os.path.join(DATA_DIR, 'events.json')
+from utils.supabase_client import get_supabase
 
 # ---------------------------------------------------------------------------
 # Day-of-week choices for the slash command dropdown
@@ -52,19 +44,6 @@ DAY_TO_WEEKDAY = {
     "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
     "friday": 4, "saturday": 5, "sunday": 6,
 }
-
-
-def _load_events() -> dict:
-    """Load the events data file, returning a default structure if missing."""
-    if os.path.exists(EVENTS_FILE):
-        with open(EVENTS_FILE, 'r') as f:
-            return json.load(f)
-    return {"events": {}}
-
-
-def _save_events(data: dict):
-    """Persist events data atomically."""
-    atomic_save(EVENTS_FILE, data)
 
 
 def _next_occurrence(day: str, time_str: str, tz_name: str) -> datetime:
@@ -115,7 +94,7 @@ class EventsCog(BaseCog):
 
     def __init__(self, bot: commands.Bot):
         super().__init__(bot)
-        self.data = _load_events()
+        self.supabase = get_supabase()
 
     async def cog_load(self):
         """Start the reminder loop when the cog is loaded."""
@@ -132,11 +111,12 @@ class EventsCog(BaseCog):
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         """Return matching event names for autocomplete fields."""
-        names = list(self.data["events"].keys())
+        result = self.supabase.table("events").select("slug, name").execute()
+        rows = result.data or []
         return [
-            app_commands.Choice(name=self.data["events"][n]["name"], value=n)
-            for n in names
-            if current.lower() in n.lower()
+            app_commands.Choice(name=row["name"], value=row["slug"])
+            for row in rows
+            if current.lower() in row["slug"].lower()
         ][:25]
 
     # ------------------------------------------------------------------
@@ -190,7 +170,8 @@ class EventsCog(BaseCog):
 
         # Build a slug key from the name
         key = name.lower().replace(" ", "-")
-        if key in self.data["events"]:
+        existing = self.supabase.table("events").select("id").eq("slug", key).execute()
+        if existing.data:
             await interaction.response.send_message(
                 f"\u274c An event with key `{key}` already exists. Use `/edit_event` or `/cancel_event` first.",
                 ephemeral=True,
@@ -200,19 +181,18 @@ class EventsCog(BaseCog):
         channel_id = channel.id if channel else FRACTAL_BOT_CHANNEL_ID
 
         event = {
+            "slug": key,
             "name": name,
-            "day": day.value,
-            "time": time,
+            "day_of_week": day.value,
+            "event_time": time,
             "timezone": tz,
             "channel_id": str(channel_id),
             "created_by": str(interaction.user.id),
-            "created_at": datetime.now(timezone.utc).isoformat(),
             "last_reminded_24h": None,
             "last_reminded_6h": None,
             "last_reminded_1h": None,
         }
-        self.data["events"][key] = event
-        _save_events(self.data)
+        self.supabase.table("events").insert(event).execute()
 
         next_time = _next_occurrence(day.value, time, tz)
         countdown = _format_countdown(next_time - datetime.now(timezone.utc))
@@ -237,8 +217,9 @@ class EventsCog(BaseCog):
     # ------------------------------------------------------------------
     @app_commands.command(name="events", description="List all scheduled recurring events")
     async def list_events(self, interaction: discord.Interaction):
-        events = self.data.get("events", {})
-        if not events:
+        result = self.supabase.table("events").select("*").execute()
+        rows = result.data or []
+        if not rows:
             await interaction.response.send_message(
                 "No events scheduled yet. Use `/schedule` to create one.", ephemeral=True
             )
@@ -251,14 +232,14 @@ class EventsCog(BaseCog):
         )
 
         now = datetime.now(timezone.utc)
-        for key, ev in events.items():
-            next_time = _next_occurrence(ev["day"], ev["time"], ev["timezone"])
+        for ev in rows:
+            next_time = _next_occurrence(ev["day_of_week"], ev["event_time"], ev["timezone"])
             countdown = _format_countdown(next_time - now)
             embed.add_field(
                 name=f"{ev['name']}",
                 value=(
-                    f"**Day:** {ev['day'].capitalize()}\n"
-                    f"**Time:** {ev['time']} ({ev['timezone']})\n"
+                    f"**Day:** {ev['day_of_week'].capitalize()}\n"
+                    f"**Time:** {ev['event_time']} ({ev['timezone']})\n"
                     f"**Next:** <t:{int(next_time.timestamp())}:F>\n"
                     f"**Countdown:** {countdown}\n"
                     f"**Channel:** <#{ev['channel_id']}>"
@@ -281,15 +262,15 @@ class EventsCog(BaseCog):
             )
             return
 
-        if name not in self.data["events"]:
+        result = self.supabase.table("events").select("name").eq("slug", name).execute()
+        if not result.data:
             await interaction.response.send_message(
                 f"\u274c No event found with key `{name}`.", ephemeral=True
             )
             return
 
-        event_name = self.data["events"][name]["name"]
-        del self.data["events"][name]
-        _save_events(self.data)
+        event_name = result.data[0]["name"]
+        self.supabase.table("events").delete().eq("slug", name).execute()
 
         embed = discord.Embed(
             title="\U0001f5d1\ufe0f Event Cancelled",
@@ -327,17 +308,19 @@ class EventsCog(BaseCog):
             )
             return
 
-        if name not in self.data["events"]:
+        result = self.supabase.table("events").select("*").eq("slug", name).execute()
+        if not result.data:
             await interaction.response.send_message(
                 f"\u274c No event found with key `{name}`.", ephemeral=True
             )
             return
 
-        ev = self.data["events"][name]
+        ev = result.data[0]
+        updates = {}
         updated = []
 
         if day is not None:
-            ev["day"] = day.value
+            updates["day_of_week"] = day.value
             updated.append(f"Day -> {day.name}")
 
         if time is not None:
@@ -350,7 +333,7 @@ class EventsCog(BaseCog):
                     "\u274c Invalid time format. Use 24h format like `18:00`.", ephemeral=True
                 )
                 return
-            ev["time"] = time
+            updates["event_time"] = time
             updated.append(f"Time -> {time}")
 
         if tz is not None:
@@ -361,11 +344,11 @@ class EventsCog(BaseCog):
                     f"\u274c Unknown timezone `{tz}`.", ephemeral=True
                 )
                 return
-            ev["timezone"] = tz
+            updates["timezone"] = tz
             updated.append(f"Timezone -> {tz}")
 
         if channel is not None:
-            ev["channel_id"] = str(channel.id)
+            updates["channel_id"] = str(channel.id)
             updated.append(f"Channel -> #{channel.name}")
 
         if not updated:
@@ -375,13 +358,16 @@ class EventsCog(BaseCog):
             return
 
         # Reset reminder tracking since the schedule changed
-        ev["last_reminded_24h"] = None
-        ev["last_reminded_6h"] = None
-        ev["last_reminded_1h"] = None
+        updates["last_reminded_24h"] = None
+        updates["last_reminded_6h"] = None
+        updates["last_reminded_1h"] = None
 
-        _save_events(self.data)
+        self.supabase.table("events").update(updates).eq("slug", name).execute()
 
-        next_time = _next_occurrence(ev["day"], ev["time"], ev["timezone"])
+        # Merge updates into ev for the response embed
+        ev.update(updates)
+
+        next_time = _next_occurrence(ev["day_of_week"], ev["event_time"], ev["timezone"])
         countdown = _format_countdown(next_time - datetime.now(timezone.utc))
 
         embed = discord.Embed(
@@ -404,16 +390,18 @@ class EventsCog(BaseCog):
     async def reminder_check(self):
         """Check all events and send reminders at 24h, 6h, and 1h before."""
         now = datetime.now(timezone.utc)
-        changed = False
 
-        for key, ev in self.data.get("events", {}).items():
-            next_time = _next_occurrence(ev["day"], ev["time"], ev["timezone"])
+        result = self.supabase.table("events").select("*").execute()
+        rows = result.data or []
+
+        for ev in rows:
+            next_time = _next_occurrence(ev["day_of_week"], ev["event_time"], ev["timezone"])
             time_until = next_time - now
             total_seconds = time_until.total_seconds()
 
             channel = self.bot.get_channel(int(ev["channel_id"]))
             if channel is None:
-                self.logger.warning(f"[EVENTS] Cannot find channel {ev['channel_id']} for event {key}")
+                self.logger.warning(f"[EVENTS] Cannot find channel {ev['channel_id']} for event {ev['slug']}")
                 continue
 
             # Unique identifier for this specific occurrence (the target timestamp)
@@ -439,7 +427,7 @@ class EventsCog(BaseCog):
                         timestamp=now,
                     )
                     embed.add_field(name="Event", value=ev["name"], inline=True)
-                    embed.add_field(name="Day", value=ev["day"].capitalize(), inline=True)
+                    embed.add_field(name="Day", value=ev["day_of_week"].capitalize(), inline=True)
                     embed.add_field(name="Time", value=time_display, inline=True)
                     embed.add_field(
                         name="Countdown",
@@ -451,13 +439,12 @@ class EventsCog(BaseCog):
                         content=f"@everyone Fractal meeting {label} at **{time_display}**!",
                         embed=embed,
                     )
-                    self.logger.info(f"[EVENTS] Sent {field} reminder for {key} (next: {occurrence_key})")
+                    self.logger.info(f"[EVENTS] Sent {field} reminder for {ev['slug']} (next: {occurrence_key})")
 
-                    ev[field] = occurrence_key
-                    changed = True
-
-        if changed:
-            _save_events(self.data)
+                    # Update just this reminder field in Supabase
+                    self.supabase.table("events").update(
+                        {field: occurrence_key}
+                    ).eq("slug", ev["slug"]).execute()
 
     @reminder_check.before_loop
     async def before_reminder_check(self):

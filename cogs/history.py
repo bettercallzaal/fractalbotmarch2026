@@ -2,9 +2,10 @@
 Fractal history tracking cog for the ZAO Fractal Bot.
 
 Records the outcome of every completed fractal session (rankings, Respect
-earned, facilitator, etc.) in ``history.json``.  Provides slash commands
-for searching past fractals, viewing personal stats, and displaying the
-cumulative Respect leaderboard.
+earned, facilitator, etc.) in the Supabase ``fractal_sessions`` and
+``fractal_rankings`` tables.  Provides slash commands for searching past
+fractals, viewing personal stats, and displaying the cumulative Respect
+leaderboard.
 
 The ``FractalHistory`` data store is attached to ``bot.fractal_history``
 so the core fractal cog can call ``record()`` when a session ends.
@@ -13,52 +14,83 @@ so the core fractal cog can call ``record()`` when a session ends.
 import discord
 from discord import app_commands
 from discord.ext import commands
-import json
-import os
 import logging
 from datetime import datetime, timezone
 from cogs.base import BaseCog
-
-# Resolve the path to the persistent data directory (project_root/data/)
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-
-# File path for the JSON-backed fractal history store
-HISTORY_FILE = os.path.join(DATA_DIR, 'history.json')
+from utils.supabase_client import get_supabase
 
 
 class FractalHistory:
-    """Append-only JSON store of completed fractal session results.
+    """Supabase-backed store of completed fractal session results.
 
-    Each entry captures the group name, facilitator, participant rankings,
-    and Respect points awarded.  The file is a flat list (not indexed),
-    so queries are linear scans -- fine for the expected scale (hundreds,
-    not millions of fractals).
+    Session metadata lives in ``fractal_sessions`` and per-participant
+    rankings live in ``fractal_rankings``.  All queries go directly to
+    Supabase; there is no in-memory state.
     """
 
     def __init__(self):
-        """Initialise the store with an empty fractals list and load persisted data."""
+        """Initialise the store with a Supabase client."""
         self.logger = logging.getLogger('bot')
-        self._data = {'fractals': []}  # Top-level dict wrapping the list of entries
-        self._load()
+        self.sb = get_supabase()
 
-    def _load(self):
-        """Read history from disk if the file exists."""
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, 'r') as f:
-                self._data = json.load(f)
-        # Backwards compatibility: add next_id counter if missing
-        if 'next_id' not in self._data:
-            self._data['next_id'] = len(self._data['fractals']) + 1
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-    def _save(self):
-        """Persist history atomically to prevent corruption."""
-        from utils.safe_json import atomic_save
-        atomic_save(HISTORY_FILE, self._data)
+    @staticmethod
+    def _session_to_entry(session: dict) -> dict:
+        """Convert a Supabase session row (with embedded rankings) to the
+        dict format the rest of the codebase expects.
+
+        Expected output format::
+
+            {
+                'id': int,
+                'group_name': str,
+                'facilitator_id': str,
+                'facilitator_name': str,
+                'fractal_number': str,
+                'group_number': str,
+                'guild_id': str,
+                'thread_id': str,
+                'rankings': [{'user_id': str, 'display_name': str,
+                              'level': int, 'respect': int}, ...],
+                'completed_at': str (ISO-8601),
+            }
+        """
+        raw_rankings = session.get("fractal_rankings", [])
+        # Sort by rank_position so index order matches the old list convention
+        sorted_rankings = sorted(raw_rankings, key=lambda r: r.get("rank_position", 0))
+        rankings = [
+            {
+                "user_id": r["user_id"],
+                "display_name": r["display_name"],
+                "level": r["level"],
+                "respect": r["respect"],
+            }
+            for r in sorted_rankings
+        ]
+        return {
+            "id": session["id"],
+            "group_name": session["group_name"],
+            "facilitator_id": session["facilitator_id"],
+            "facilitator_name": session["facilitator_name"],
+            "fractal_number": session.get("fractal_number", ""),
+            "group_number": session.get("group_number", ""),
+            "guild_id": session["guild_id"],
+            "thread_id": session.get("thread_id", ""),
+            "rankings": rankings,
+            "completed_at": session["completed_at"],
+        }
+
+    # ------------------------------------------------------------------
+    # Public API (same interface the command handlers rely on)
+    # ------------------------------------------------------------------
 
     def record(self, group_name: str, facilitator_id: int, facilitator_name: str,
                fractal_number: str, group_number: str, guild_id: int,
                thread_id: int, rankings: list[dict]):
-        """Append a new completed fractal entry and persist to disk.
+        """Insert a completed fractal session and its rankings into Supabase.
 
         Args:
             group_name: The display name of the fractal group.
@@ -73,33 +105,56 @@ class FractalHistory:
                 rank (index 0 = 1st place).
 
         Returns:
-            The newly created entry dict (includes an auto-incremented ``id``).
+            The newly created entry dict (same shape as the old JSON format).
         """
-        # Auto-increment ID using a persistent counter (survives deletions)
-        entry = {
-            'id': self._data['next_id'],
-            'group_name': group_name,
-            'facilitator_id': str(facilitator_id),
-            'facilitator_name': facilitator_name,
-            'fractal_number': fractal_number,
-            'group_number': group_number,
-            'guild_id': str(guild_id),
-            'thread_id': str(thread_id),
-            'rankings': rankings,
-            'completed_at': datetime.now(timezone.utc).isoformat()
+        session_row = {
+            "group_name": group_name,
+            "facilitator_id": str(facilitator_id),
+            "facilitator_name": facilitator_name,
+            "fractal_number": fractal_number,
+            "group_number": group_number,
+            "guild_id": str(guild_id),
+            "thread_id": str(thread_id),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._data['fractals'].append(entry)
-        self._data['next_id'] += 1
-        self._save()
+        session_result = (
+            self.sb.table("fractal_sessions")
+            .insert(session_row)
+            .execute()
+        )
+        session = session_result.data[0]
+        session_id = session["id"]
+
+        # Bulk-insert rankings
+        ranking_rows = [
+            {
+                "session_id": session_id,
+                "user_id": str(r["user_id"]),
+                "display_name": r["display_name"],
+                "level": r["level"],
+                "respect": r.get("respect", 0),
+                "rank_position": i + 1,
+            }
+            for i, r in enumerate(rankings)
+        ]
+        if ranking_rows:
+            self.sb.table("fractal_rankings").insert(ranking_rows).execute()
+
+        # Return in the legacy dict format
+        entry = dict(session_row)
+        entry["id"] = session_id
+        entry["rankings"] = rankings
         return entry
 
     def get_all(self) -> list[dict]:
-        """Return every recorded fractal entry.
-
-        Returns:
-            A shallow copy of the full list of fractal entry dicts.
-        """
-        return list(self._data['fractals'])
+        """Return every recorded fractal entry with embedded rankings."""
+        result = (
+            self.sb.table("fractal_sessions")
+            .select("*, fractal_rankings(*)")
+            .order("id")
+            .execute()
+        )
+        return [self._session_to_entry(s) for s in result.data]
 
     def get_recent(self, count: int = 10) -> list[dict]:
         """Return the *count* most recent fractal entries.
@@ -108,101 +163,162 @@ class FractalHistory:
             count: Maximum number of entries to return (default 10).
 
         Returns:
-            A slice of the most recent entries (may be fewer than *count*).
+            The most recent entries sorted oldest-first (matching old behaviour).
         """
-        return self._data['fractals'][-count:]
+        result = (
+            self.sb.table("fractal_sessions")
+            .select("*, fractal_rankings(*)")
+            .order("completed_at", desc=True)
+            .limit(count)
+            .execute()
+        )
+        entries = [self._session_to_entry(s) for s in result.data]
+        # Reverse so the list is oldest-first (matches old slice behaviour)
+        entries.reverse()
+        return entries
 
     def get_by_user(self, user_id: int) -> list[dict]:
         """Return all fractals in which *user_id* participated.
 
-        Args:
-            user_id: The Discord user snowflake to search for.
-
-        Returns:
-            A list of fractal entry dicts where the user appears in rankings.
+        Uses an inner join on ``fractal_rankings`` to filter sessions
+        where the user appears.
         """
         uid = str(user_id)
-        results = []
-        for fractal in self._data['fractals']:
-            for r in fractal['rankings']:
-                # Compare as strings since user IDs are stored as strings in entries
-                if str(r['user_id']) == uid:
-                    results.append(fractal)
-                    break  # Found the user in this fractal; move to the next one
-        return results
+        result = (
+            self.sb.table("fractal_sessions")
+            .select("*, fractal_rankings!inner(*)")
+            .eq("fractal_rankings.user_id", uid)
+            .order("id")
+            .execute()
+        )
+        # The inner join may return only the matched ranking; re-fetch full
+        # rankings for each matched session so the entry looks complete.
+        if not result.data:
+            return []
+        session_ids = [s["id"] for s in result.data]
+        full_result = (
+            self.sb.table("fractal_sessions")
+            .select("*, fractal_rankings(*)")
+            .in_("id", session_ids)
+            .order("id")
+            .execute()
+        )
+        return [self._session_to_entry(s) for s in full_result.data]
 
     def get_user_stats(self, user_id: int) -> dict:
         """Aggregate lifetime stats for a single user.
 
-        Args:
-            user_id: The Discord user snowflake to aggregate stats for.
+        Tries the ``respect_leaderboard`` VIEW first for efficiency;
+        falls back to a manual scan if the view is not available.
 
         Returns:
             A dict with keys: ``total_respect``, ``participations``,
             ``first_place``, ``second_place``, ``third_place``.
         """
         uid = str(user_id)
+        try:
+            result = (
+                self.sb.table("respect_leaderboard")
+                .select("*")
+                .eq("user_id", uid)
+                .maybe_single()
+                .execute()
+            )
+            if result.data:
+                row = result.data
+                return {
+                    "total_respect": int(row.get("total_respect", 0)),
+                    "participations": int(row.get("participations", 0)),
+                    "first_place": int(row.get("first_place", 0)),
+                    "second_place": int(row.get("second_place", 0)),
+                    "third_place": int(row.get("third_place", 0)),
+                }
+        except Exception:
+            self.logger.debug("respect_leaderboard view unavailable, falling back to manual scan")
+
+        # Fallback: compute from raw rankings
+        rankings_result = (
+            self.sb.table("fractal_rankings")
+            .select("respect, rank_position")
+            .eq("user_id", uid)
+            .execute()
+        )
         total_respect = 0
         participations = 0
-        placements = {1: 0, 2: 0, 3: 0}  # podium finish counts
-
-        for fractal in self._data['fractals']:
-            for i, r in enumerate(fractal['rankings']):
-                if str(r['user_id']) == uid:
-                    total_respect += r.get('respect', 0)
-                    participations += 1
-                    rank = i + 1  # rankings list is 0-indexed; rank is 1-indexed
-                    if rank in placements:
-                        placements[rank] += 1
-                    break
+        placements = {1: 0, 2: 0, 3: 0}
+        for r in rankings_result.data:
+            total_respect += r.get("respect", 0)
+            participations += 1
+            pos = r.get("rank_position", 0)
+            if pos in placements:
+                placements[pos] += 1
 
         return {
-            'total_respect': total_respect,
-            'participations': participations,
-            'first_place': placements[1],
-            'second_place': placements[2],
-            'third_place': placements[3],
+            "total_respect": total_respect,
+            "participations": participations,
+            "first_place": placements[1],
+            "second_place": placements[2],
+            "third_place": placements[3],
         }
 
     def get_leaderboard(self) -> list[dict]:
         """Build a cumulative Respect leaderboard across all recorded fractals.
 
+        Uses the ``respect_leaderboard`` VIEW when available, otherwise
+        aggregates manually from ``fractal_rankings``.
+
         Returns a list of user dicts sorted by total Respect descending,
         each annotated with a ``rank`` field.
         """
-        user_totals = {}  # user_id -> {name, respect, participations}
-
-        for fractal in self._data['fractals']:
-            for r in fractal['rankings']:
-                uid = str(r['user_id'])
-                if uid not in user_totals:
-                    user_totals[uid] = {
-                        'user_id': uid,
-                        'display_name': r['display_name'],
-                        'respect': 0,
-                        'participations': 0
+        try:
+            result = (
+                self.sb.table("respect_leaderboard")
+                .select("*")
+                .execute()
+            )
+            if result.data:
+                return [
+                    {
+                        "user_id": row["user_id"],
+                        "display_name": row["display_name"],
+                        "respect": int(row.get("total_respect", 0)),
+                        "participations": int(row.get("participations", 0)),
+                        "rank": int(row.get("rank", 0)),
                     }
-                user_totals[uid]['respect'] += r.get('respect', 0)
-                user_totals[uid]['participations'] += 1
-                # Always keep the latest display name in case it changed.
-                user_totals[uid]['display_name'] = r['display_name']
+                    for row in result.data
+                ]
+        except Exception:
+            self.logger.debug("respect_leaderboard view unavailable, falling back to manual scan")
 
-        # Sort by total Respect descending and assign 1-indexed ranks
-        ranked = sorted(user_totals.values(), key=lambda x: -x['respect'])
+        # Fallback: manual aggregation
+        rankings_result = (
+            self.sb.table("fractal_rankings")
+            .select("user_id, display_name, respect")
+            .execute()
+        )
+        user_totals: dict[str, dict] = {}
+        for r in rankings_result.data:
+            uid = r["user_id"]
+            if uid not in user_totals:
+                user_totals[uid] = {
+                    "user_id": uid,
+                    "display_name": r["display_name"],
+                    "respect": 0,
+                    "participations": 0,
+                }
+            user_totals[uid]["respect"] += r.get("respect", 0)
+            user_totals[uid]["participations"] += 1
+            user_totals[uid]["display_name"] = r["display_name"]
+
+        ranked = sorted(user_totals.values(), key=lambda x: -x["respect"])
         for i, entry in enumerate(ranked):
-            entry['rank'] = i + 1
+            entry["rank"] = i + 1
         return ranked
 
     def search(self, query: str) -> list[dict]:
         """Case-insensitive substring search across fractal entries.
 
-        Matches are checked in priority order for each fractal:
-            1. Group name
-            2. Fractal number
-            3. Any participant's display name
-
-        A fractal is included at most once even if it matches on multiple
-        criteria.
+        Searches group_name, fractal_number, and participant display names.
 
         Args:
             query: The search string (case-insensitive substring match).
@@ -210,28 +326,47 @@ class FractalHistory:
         Returns:
             A list of matching fractal entry dicts.
         """
-        query = query.lower()
-        results = []
-        for fractal in self._data['fractals']:
-            # Priority 1: match against the group name
-            if query in fractal['group_name'].lower():
-                results.append(fractal)
-                continue
-            # Priority 2: match against the fractal session number
-            if query in fractal.get('fractal_number', '').lower():
-                results.append(fractal)
-                continue
-            # Priority 3: match against any participant's display name
-            for r in fractal['rankings']:
-                if query in r['display_name'].lower():
-                    results.append(fractal)
-                    break
-        return results
+        q = query.strip()
+        # Search sessions by group_name or fractal_number
+        session_result = (
+            self.sb.table("fractal_sessions")
+            .select("*, fractal_rankings(*)")
+            .or_(f"group_name.ilike.%{q}%,fractal_number.ilike.%{q}%")
+            .order("id")
+            .execute()
+        )
+        found_ids = {s["id"] for s in session_result.data}
+        entries = [self._session_to_entry(s) for s in session_result.data]
+
+        # Also search by participant display name
+        name_result = (
+            self.sb.table("fractal_rankings")
+            .select("session_id")
+            .ilike("display_name", f"%{q}%")
+            .execute()
+        )
+        extra_ids = [r["session_id"] for r in name_result.data if r["session_id"] not in found_ids]
+        if extra_ids:
+            extra_result = (
+                self.sb.table("fractal_sessions")
+                .select("*, fractal_rankings(*)")
+                .in_("id", list(set(extra_ids)))
+                .order("id")
+                .execute()
+            )
+            entries.extend(self._session_to_entry(s) for s in extra_result.data)
+
+        return entries
 
     @property
     def total_fractals(self) -> int:
         """Total number of completed fractals on record."""
-        return len(self._data['fractals'])
+        result = (
+            self.sb.table("fractal_sessions")
+            .select("id", count="exact")
+            .execute()
+        )
+        return result.count or 0
 
 
 class HistoryCog(BaseCog):

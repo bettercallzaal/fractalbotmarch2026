@@ -10,8 +10,9 @@ ensuring that voting power reflects community standing.
 Key components:
     - _get_cached_respect: Thin caching wrapper around ``utils.blockchain.get_total_respect``
       that maintains a 5-minute TTL cache to reduce RPC calls for vote-weight lookups.
-    - ProposalStore: A JSON-file-backed data store that handles creation, retrieval,
-      voting, closing, and deletion of proposals. All mutations are atomically saved.
+    - ProposalStore: A Supabase-backed data store that handles creation, retrieval,
+      voting, closing, and deletion of proposals via the ``proposals`` and
+      ``proposal_votes`` Postgres tables.
     - ProposalVoteView / GovernanceVoteView: Persistent Discord UI button views that
       survive bot restarts by encoding the proposal ID into each button's custom_id.
     - ProposalsCog: The discord.py cog that wires everything together, including slash
@@ -31,8 +32,6 @@ Proposal lifecycle:
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
-import json
-import os
 import re
 import html
 import logging
@@ -41,10 +40,7 @@ from datetime import datetime, timedelta, timezone
 from cogs.base import BaseCog
 from config.config import PROPOSAL_TYPES, MAX_PROPOSAL_OPTIONS, PROPOSALS_CHANNEL_ID
 from utils.blockchain import get_total_respect
-
-# Path to the JSON file that persists all proposal data between bot restarts
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-PROPOSALS_FILE = os.path.join(DATA_DIR, 'proposals.json')
+from utils.supabase_client import get_supabase
 
 
 def _parse_utc(iso_str: str) -> datetime:
@@ -169,53 +165,89 @@ async def _scrape_og_tags(url: str) -> dict:
 
 
 class ProposalStore:
-    """JSON-backed persistent store for proposals with Respect-weighted voting.
+    """Supabase-backed persistent store for proposals with Respect-weighted voting.
 
-    All proposal data is held in memory as a dict and written atomically to
-    ``data/proposals.json`` on every mutation. The data structure contains:
-        - ``next_id``: Auto-incrementing integer counter for proposal IDs.
-        - ``proposals``: Dict mapping string proposal IDs to proposal dicts.
-        - ``_index_message_id``: The Discord message ID of the pinned index
-          embed in the proposals channel (used for in-place editing).
+    All proposal data is stored in the ``proposals`` and ``proposal_votes``
+    Postgres tables via the Supabase REST API. The ``bot_metadata`` table
+    stores the pinned index message ID.
 
-    Each proposal dict contains: id, title, description, type, author_id,
-    thread_id, message_id, status ('active'/'closed'), votes (dict keyed by
-    user ID), options (list), funding_amount, image_url, project_url,
+    Methods return dicts in the same format as the legacy JSON store so that
+    all existing consumers (commands, views, background tasks) continue to
+    work without modification. Each proposal dict contains: id, title,
+    description, type, author_id, thread_id, message_id, status, votes
+    (dict keyed by user ID), options, funding_amount, image_url, project_url,
     created_at, and optionally closed_at.
     """
 
     def __init__(self):
         self.logger = logging.getLogger('bot')
-        # Default data structure: auto-incrementing ID counter, proposals dict, and
-        # the Discord message ID of the pinned proposals index embed.
-        self._data = {'next_id': 1, 'proposals': {}, '_index_message_id': None}
-        self._load()
+        self.sb = get_supabase()
 
-    def _load(self):
-        """Load proposal data from disk if the JSON file exists."""
-        if os.path.exists(PROPOSALS_FILE):
-            with open(PROPOSALS_FILE, 'r') as f:
-                self._data = json.load(f)
-            # Migrate: ensure _index_message_id exists for older data files
-            if '_index_message_id' not in self._data:
-                self._data['_index_message_id'] = None
+    def _row_to_proposal(self, row: dict, votes_rows: list[dict] | None = None) -> dict:
+        """Convert a Supabase ``proposals`` row (+ optional votes rows) into
+        the dict format the rest of the cog expects.
 
-    def _save(self):
-        """Persist proposal data to disk using atomic write to prevent corruption."""
-        from utils.safe_json import atomic_save
-        atomic_save(PROPOSALS_FILE, self._data)
+        Args:
+            row: A single row from the ``proposals`` table.
+            votes_rows: Optional list of rows from ``proposal_votes`` for this
+                proposal. If None, votes will not be included (empty dict).
+        """
+        # Build the votes dict keyed by voter_id string
+        votes: dict = {}
+        if votes_rows:
+            for v in votes_rows:
+                votes[str(v['voter_id'])] = {
+                    'value': v['vote_value'],
+                    'weight': float(v['weight']),
+                }
+
+        proposal = {
+            'id': str(row['id']),
+            'title': row['title'],
+            'description': row.get('description') or '',
+            'type': row['proposal_type'],
+            'author_id': str(row['author_id']),
+            'thread_id': str(row['thread_id']) if row.get('thread_id') else '',
+            'message_id': str(row['message_id']) if row.get('message_id') else '',
+            'status': row['status'],
+            'votes': votes,
+            'options': row.get('options') or [],
+            'funding_amount': float(row['funding_amount']) if row.get('funding_amount') is not None else None,
+            'image_url': row.get('image_url'),
+            'project_url': row.get('project_url'),
+            'created_at': row['created_at'],
+        }
+        if row.get('closed_at'):
+            proposal['closed_at'] = row['closed_at']
+        return proposal
+
+    def _fetch_votes(self, proposal_id: str) -> list[dict]:
+        """Fetch all vote rows for a given proposal from Supabase."""
+        resp = self.sb.table('proposal_votes') \
+            .select('voter_id, vote_value, weight') \
+            .eq('proposal_id', int(proposal_id)) \
+            .execute()
+        return resp.data or []
 
     @property
     def index_message_id(self) -> int | None:
         """Get the Discord message ID of the pinned active-proposals index embed."""
-        mid = self._data.get('_index_message_id')
-        return int(mid) if mid else None
+        resp = self.sb.table('bot_metadata') \
+            .select('value') \
+            .eq('key', 'proposals_index_message_id') \
+            .execute()
+        if resp.data and resp.data[0].get('value'):
+            return int(resp.data[0]['value'])
+        return None
 
     @index_message_id.setter
     def index_message_id(self, value: int | None):
         """Set (and persist) the Discord message ID of the pinned index embed."""
-        self._data['_index_message_id'] = str(value) if value else None
-        self._save()
+        str_val = str(value) if value else None
+        self.sb.table('bot_metadata').upsert({
+            'key': 'proposals_index_message_id',
+            'value': str_val,
+        }, on_conflict='key').execute()
 
     def create(self, title: str, description: str, proposal_type: str,
                author_id: int, thread_id: int, message_id: int,
@@ -223,10 +255,10 @@ class ProposalStore:
                funding_amount: float | None = None,
                image_url: str | None = None,
                project_url: str | None = None) -> dict:
-        """Create a new proposal and persist it to disk.
+        """Create a new proposal in Supabase.
 
-        Assigns an auto-incrementing ID, sets the initial status to 'active',
-        and records the creation timestamp in UTC. Returns the full proposal dict.
+        The ID is auto-generated by BIGSERIAL. Returns the full proposal dict
+        (with an empty votes dict, since it's brand new).
 
         Args:
             title: Short human-readable title for the proposal.
@@ -240,103 +272,184 @@ class ProposalStore:
             image_url: Optional thumbnail image URL for the embed.
             project_url: Optional link to the project (curation proposals).
         """
-        pid = str(self._data['next_id'])
-        self._data['next_id'] += 1
-
-        proposal = {
-            'id': pid,
+        row_data = {
             'title': title,
             'description': description,
-            'type': proposal_type,
+            'proposal_type': proposal_type,
             'author_id': str(author_id),
             'thread_id': str(thread_id),
             'message_id': str(message_id),
             'status': 'active',
-            'votes': {},
             'options': options or [],
-            'funding_amount': funding_amount,
             'image_url': image_url,
             'project_url': project_url,
-            'created_at': datetime.now(timezone.utc).isoformat()
         }
+        if funding_amount is not None:
+            row_data['funding_amount'] = funding_amount
 
-        self._data['proposals'][pid] = proposal
-        self._save()
-        return proposal
+        resp = self.sb.table('proposals').insert(row_data).execute()
+        row = resp.data[0]
+        return self._row_to_proposal(row, votes_rows=[])
 
     def get(self, proposal_id: str) -> dict | None:
-        """Retrieve a proposal by its string ID, or None if not found."""
-        return self._data['proposals'].get(str(proposal_id))
+        """Retrieve a proposal by its ID, including its votes.
+
+        Returns the proposal dict with a populated ``votes`` sub-dict,
+        or None if not found.
+        """
+        resp = self.sb.table('proposals') \
+            .select('*') \
+            .eq('id', int(proposal_id)) \
+            .execute()
+        if not resp.data:
+            return None
+        votes = self._fetch_votes(proposal_id)
+        return self._row_to_proposal(resp.data[0], votes_rows=votes)
 
     def get_active(self) -> list[dict]:
-        """Return a list of all proposals whose status is 'active'."""
-        return [p for p in self._data['proposals'].values() if p['status'] == 'active']
+        """Return all proposals with status 'active', each with its votes."""
+        resp = self.sb.table('proposals') \
+            .select('*') \
+            .eq('status', 'active') \
+            .execute()
+        if not resp.data:
+            return []
+        results = []
+        for row in resp.data:
+            votes = self._fetch_votes(str(row['id']))
+            results.append(self._row_to_proposal(row, votes_rows=votes))
+        return results
 
     def vote(self, proposal_id: str, user_id: int, value: str, weight: float = 1.0) -> bool:
-        """Record or update a user's vote on a proposal.
+        """Record or update a user's vote on a proposal via UPSERT.
 
-        Each user can only have one active vote per proposal; re-voting overwrites
-        the previous choice. Only active proposals accept votes.
+        The UNIQUE(proposal_id, voter_id) constraint ensures one vote per user.
+        Re-voting updates the existing row.
 
         Args:
             proposal_id: The proposal to vote on.
             user_id: Discord user ID of the voter.
-            value: The vote choice (e.g. 'yes', 'no', 'abstain', or a governance option).
+            value: The vote choice (e.g. 'yes', 'no', 'abstain', or an option).
             weight: The voter's Respect balance, used for weighted tallying.
 
         Returns:
             True if the vote was recorded, False if the proposal is closed or missing.
         """
-        proposal = self.get(str(proposal_id))
-        if not proposal or proposal['status'] != 'active':
+        # Check proposal exists and is active
+        resp = self.sb.table('proposals') \
+            .select('status') \
+            .eq('id', int(proposal_id)) \
+            .execute()
+        if not resp.data or resp.data[0]['status'] != 'active':
             return False
-        # Keyed by user ID string so each user can only have one vote
-        proposal['votes'][str(user_id)] = {'value': value, 'weight': weight}
-        self._save()
+
+        self.sb.table('proposal_votes').upsert({
+            'proposal_id': int(proposal_id),
+            'voter_id': str(user_id),
+            'vote_value': value,
+            'weight': weight,
+        }, on_conflict='proposal_id,voter_id').execute()
         return True
 
     def close(self, proposal_id: str) -> dict | None:
         """Close a proposal, preventing further votes. Returns the proposal or None."""
-        proposal = self.get(str(proposal_id))
-        if not proposal:
+        resp = self.sb.table('proposals') \
+            .update({
+                'status': 'closed',
+                'closed_at': datetime.now(timezone.utc).isoformat(),
+            }) \
+            .eq('id', int(proposal_id)) \
+            .execute()
+        if not resp.data:
             return None
-        proposal['status'] = 'closed'
-        proposal['closed_at'] = datetime.now(timezone.utc).isoformat()
-        self._save()
-        return proposal
+        votes = self._fetch_votes(proposal_id)
+        return self._row_to_proposal(resp.data[0], votes_rows=votes)
+
+    def reopen(self, proposal_id: str) -> dict | None:
+        """Reopen a closed proposal with a fresh 7-day voting window.
+
+        Resets status to 'active', sets created_at to now, and clears closed_at.
+        Returns the updated proposal dict or None if not found.
+        """
+        resp = self.sb.table('proposals') \
+            .update({
+                'status': 'active',
+                'created_at': datetime.now(timezone.utc).isoformat(),
+                'closed_at': None,
+            }) \
+            .eq('id', int(proposal_id)) \
+            .execute()
+        if not resp.data:
+            return None
+        votes = self._fetch_votes(proposal_id)
+        return self._row_to_proposal(resp.data[0], votes_rows=votes)
 
     def delete(self, proposal_id: str) -> bool:
-        """Permanently remove a proposal from the store. Returns True if found and deleted."""
-        pid = str(proposal_id)
-        if pid in self._data['proposals']:
-            del self._data['proposals'][pid]
-            self._save()
-            return True
-        return False
+        """Permanently remove a proposal (cascade deletes its votes). Returns True if deleted."""
+        resp = self.sb.table('proposals') \
+            .delete() \
+            .eq('id', int(proposal_id)) \
+            .execute()
+        return bool(resp.data)
 
     def get_vote_summary(self, proposal_id: str) -> dict:
         """Aggregate votes into a summary of {option: {count, weight}}.
 
-        Handles both legacy string-only vote records (from older data) and
-        the current dict format with 'value' and 'weight' keys. Returns an
-        empty dict if the proposal is not found.
+        Queries proposal_votes directly and groups by vote_value.
+        Returns an empty dict if no votes exist.
         """
-        proposal = self.get(str(proposal_id))
-        if not proposal:
+        votes = self._fetch_votes(str(proposal_id))
+        if not votes:
             return {}
-        summary = {}
-        for vote_data in proposal['votes'].values():
-            # Legacy format: vote_data is just a string like 'yes'
-            if isinstance(vote_data, str):
-                value, weight = vote_data, 1.0
-            else:
-                value = vote_data['value']
-                weight = vote_data.get('weight', 1.0)
+        summary: dict = {}
+        for v in votes:
+            value = v['vote_value']
+            weight = float(v['weight'])
             if value not in summary:
                 summary[value] = {'count': 0, 'weight': 0.0}
             summary[value]['count'] += 1
             summary[value]['weight'] += weight
         return summary
+
+    def get_all_thread_ids(self) -> set[str]:
+        """Return the set of thread_id strings for all proposals in the database.
+
+        Used by admin_recover_proposals to identify which threads are already tracked.
+        """
+        resp = self.sb.table('proposals') \
+            .select('thread_id') \
+            .execute()
+        return {str(row['thread_id']) for row in (resp.data or [])}
+
+    def recover_proposal(self, title: str, description: str, proposal_type: str,
+                         author_id: str, thread_id: str, message_id: str,
+                         status: str, created_at: str,
+                         image_url: str | None = None,
+                         project_url: str | None = None) -> dict:
+        """Insert a recovered proposal directly (used by admin_recover_proposals).
+
+        Unlike create(), this accepts an explicit created_at and status so
+        that recovered proposals reflect their original creation time and
+        closure state.
+        """
+        row_data = {
+            'title': title,
+            'description': description,
+            'proposal_type': proposal_type,
+            'author_id': str(author_id),
+            'thread_id': str(thread_id),
+            'message_id': str(message_id),
+            'status': status,
+            'options': [],
+            'image_url': image_url,
+            'project_url': project_url,
+            'created_at': created_at,
+        }
+        if status == 'closed':
+            row_data['closed_at'] = datetime.now(timezone.utc).isoformat()
+
+        resp = self.sb.table('proposals').insert(row_data).execute()
+        return self._row_to_proposal(resp.data[0], votes_rows=[])
 
 
 def _build_tally_text(store: ProposalStore, proposal_id: str) -> str:
@@ -789,7 +902,7 @@ class ProposalsCog(BaseCog):
     """
 
     def __init__(self, bot):
-        """Initialize the proposals cog with a fresh ProposalStore loaded from disk."""
+        """Initialize the proposals cog with a Supabase-backed ProposalStore."""
         super().__init__(bot)
         self.store = ProposalStore()
 
@@ -1176,7 +1289,7 @@ class ProposalsCog(BaseCog):
         # ProposalStore.create() and for registering the persistent view.
         placeholder = await thread.send("\u23f3 Setting up proposal...")
 
-        # Persist the proposal to the JSON store (assigns auto-incrementing ID)
+        # Persist the proposal to Supabase (ID auto-generated by BIGSERIAL)
         proposal = self.store.create(
             title=title,
             description=description,
@@ -1454,11 +1567,12 @@ class ProposalsCog(BaseCog):
             return
 
         # Reset the proposal to active state with a fresh 7-day countdown
-        proposal['status'] = 'active'
-        proposal['created_at'] = datetime.now(timezone.utc).isoformat()
-        if 'closed_at' in proposal:
-            del proposal['closed_at']
-        self.store._save()
+        proposal = self.store.reopen(str(proposal_id))
+        if not proposal:
+            await interaction.followup.send(
+                f"Failed to reopen proposal #{proposal_id}.", ephemeral=True
+            )
+            return
 
         # Re-register the persistent voting view so button clicks are handled again
         pid = proposal['id']
@@ -1499,7 +1613,7 @@ class ProposalsCog(BaseCog):
     async def admin_recover_proposals(self, interaction: discord.Interaction):
         """Scan the proposals channel for orphaned threads and recover them into the data store.
 
-        This handles cases where the bot's proposals.json was lost, reset, or
+        This handles cases where the bot's proposal data was lost, reset, or
         corrupted while proposal threads still exist in Discord. It scans both
         active and recently archived threads, parses proposal metadata from the
         bot's embed, determines whether the 7-day window has passed, and
@@ -1523,9 +1637,7 @@ class ProposalsCog(BaseCog):
             return
 
         # Build a set of thread IDs already tracked to avoid duplicates
-        known_thread_ids = set()
-        for p in self.store._data['proposals'].values():
-            known_thread_ids.add(str(p['thread_id']))
+        known_thread_ids = self.store.get_all_thread_ids()
 
         recovered = []
         skipped = []
@@ -1607,28 +1719,20 @@ class ProposalsCog(BaseCog):
                 age = datetime.now(timezone.utc) - msg_created
                 status = 'closed' if age >= timedelta(days=7) else 'active'
 
-                # Assign a new ID from the auto-incrementing counter
-                pid = str(self.store._data['next_id'])
-                self.store._data['next_id'] += 1
-
-                proposal = {
-                    'id': pid,
-                    'title': title,
-                    'description': description,
-                    'type': proposal_type,
-                    'author_id': author_id,
-                    'thread_id': str(thread.id),
-                    'message_id': str(bot_message.id),
-                    'status': status,
-                    'votes': {},
-                    'options': [],
-                    'funding_amount': None,
-                    'image_url': image_url,
-                    'project_url': project_url,
-                    'created_at': created_at
-                }
-
-                self.store._data['proposals'][pid] = proposal
+                # Insert recovered proposal into Supabase (ID auto-generated)
+                proposal = self.store.recover_proposal(
+                    title=title,
+                    description=description,
+                    proposal_type=proposal_type,
+                    author_id=author_id,
+                    thread_id=str(thread.id),
+                    message_id=str(bot_message.id),
+                    status=status,
+                    created_at=created_at,
+                    image_url=image_url,
+                    project_url=project_url,
+                )
+                pid = proposal['id']
                 recovered.append(f"#{pid} — {title[:50]} ({status})")
 
                 # Register voting view and update message buttons for active proposals.
@@ -1649,9 +1753,8 @@ class ProposalsCog(BaseCog):
                 errors.append(f"{thread.name[:40]}: {str(e)[:60]}")
                 self.logger.error(f"Error recovering thread {thread.name}: {e}", exc_info=True)
 
-        # Batch-save all recovered proposals at once to minimize disk writes
+        # Refresh the pinned proposals index to include recovered proposals
         if recovered:
-            self.store._save()
             await self._update_proposals_index()
 
         # Build a human-readable report summarizing recovered, skipped, and errored threads
