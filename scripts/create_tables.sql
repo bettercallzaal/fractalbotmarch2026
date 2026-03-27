@@ -1,39 +1,55 @@
 -- ============================================================
--- ZAO Fractal Bot -- Supabase Migration
+-- ZAO Fractal Bot -- Supabase Schema (discord-prefixed tables)
 -- Run this as a single transaction in the Supabase SQL Editor
+--
+-- IMPORTANT: This script assumes ZAO OS already has these tables:
+--   - users (discord_id, primary_wallet, display_name, fid, etc.)
+--   - fractal_sessions (id UUID, session_date, name, host_name,
+--       host_wallet, scoring_era, participant_count, notes)
+--   - fractal_scores (id UUID, session_id FK, member_name,
+--       wallet_address, rank, score)
+--   - respect_members (name, wallet_address, total_respect, etc.)
+--
+-- This script:
+--   1. Adds Discord-specific columns to existing ZAO OS tables
+--   2. Creates discord_ prefixed tables for bot-only data
+--   3. Creates views, RLS policies, and Realtime publication
 -- ============================================================
 
 -- Enable UUID generation (Supabase has this by default)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ──────────────────────────────────────────────────────────────
--- WALLETS
--- ──────────────────────────────────────────────────────────────
--- Merges wallets.json (discord_id -> wallet) and
--- names_to_wallets.json (display_name -> wallet) into one table.
--- The "source" column tracks provenance.
-
-CREATE TABLE wallets (
-    id              BIGSERIAL PRIMARY KEY,
-    discord_id      VARCHAR(64) UNIQUE,          -- nullable for name-only entries
-    display_name    VARCHAR(255),                 -- from names_to_wallets.json
-    wallet_address  VARCHAR(255),                 -- can be empty string for unresolved names
-    source          VARCHAR(20) NOT NULL DEFAULT 'name',  -- 'discord_id' or 'name'
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_wallets_discord_id ON wallets(discord_id) WHERE discord_id IS NOT NULL;
-CREATE INDEX idx_wallets_wallet_address ON wallets(wallet_address) WHERE wallet_address IS NOT NULL AND wallet_address != '';
-CREATE INDEX idx_wallets_display_name ON wallets(lower(display_name)) WHERE display_name IS NOT NULL;
-
-COMMENT ON TABLE wallets IS 'Maps Discord users and display names to Ethereum wallet addresses. Merges both wallets.json and names_to_wallets.json.';
-
--- ──────────────────────────────────────────────────────────────
--- PROPOSALS
+-- 1. ADD COLUMNS TO EXISTING ZAO OS TABLES
 -- ──────────────────────────────────────────────────────────────
 
-CREATE TABLE proposals (
+-- fractal_sessions: Discord-specific metadata
+ALTER TABLE fractal_sessions ADD COLUMN IF NOT EXISTS thread_id TEXT;
+ALTER TABLE fractal_sessions ADD COLUMN IF NOT EXISTS facilitator_discord_id TEXT;
+ALTER TABLE fractal_sessions ADD COLUMN IF NOT EXISTS group_number TEXT;
+ALTER TABLE fractal_sessions ADD COLUMN IF NOT EXISTS guild_id TEXT;
+ALTER TABLE fractal_sessions ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+-- fractal_scores: Discord user link and computed fields
+ALTER TABLE fractal_scores ADD COLUMN IF NOT EXISTS discord_id TEXT;
+ALTER TABLE fractal_scores ADD COLUMN IF NOT EXISTS level INTEGER;
+ALTER TABLE fractal_scores ADD COLUMN IF NOT EXISTS respect_points INTEGER DEFAULT 0;
+
+-- Indexes on new columns
+CREATE INDEX IF NOT EXISTS idx_fractal_sessions_thread_id
+    ON fractal_sessions(thread_id) WHERE thread_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_fractal_sessions_facilitator_discord
+    ON fractal_sessions(facilitator_discord_id) WHERE facilitator_discord_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_fractal_sessions_completed
+    ON fractal_sessions(completed_at DESC) WHERE completed_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_fractal_scores_discord_id
+    ON fractal_scores(discord_id) WHERE discord_id IS NOT NULL;
+
+-- ──────────────────────────────────────────────────────────────
+-- 2. DISCORD PROPOSALS
+-- ──────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS discord_proposals (
     id              BIGSERIAL PRIMARY KEY,
     title           TEXT NOT NULL,
     description     TEXT,
@@ -50,19 +66,19 @@ CREATE TABLE proposals (
     closed_at       TIMESTAMPTZ
 );
 
-CREATE INDEX idx_proposals_status ON proposals(status);
-CREATE INDEX idx_proposals_author ON proposals(author_id);
-CREATE INDEX idx_proposals_thread ON proposals(thread_id);
+CREATE INDEX IF NOT EXISTS idx_discord_proposals_status ON discord_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_discord_proposals_author ON discord_proposals(author_id);
+CREATE INDEX IF NOT EXISTS idx_discord_proposals_thread ON discord_proposals(thread_id);
 
-COMMENT ON TABLE proposals IS 'Governance proposals created via /propose and /curate. Votes are in a separate table.';
+COMMENT ON TABLE discord_proposals IS 'Governance proposals created via Discord /propose and /curate commands. Votes stored in discord_proposal_votes.';
 
 -- ──────────────────────────────────────────────────────────────
--- PROPOSAL VOTES (normalized out of the embedded JSON dict)
+-- 3. DISCORD PROPOSAL VOTES
 -- ──────────────────────────────────────────────────────────────
 
-CREATE TABLE proposal_votes (
+CREATE TABLE IF NOT EXISTS discord_proposal_votes (
     id              BIGSERIAL PRIMARY KEY,
-    proposal_id     BIGINT NOT NULL REFERENCES proposals(id) ON DELETE CASCADE,
+    proposal_id     BIGINT NOT NULL REFERENCES discord_proposals(id) ON DELETE CASCADE,
     voter_id        VARCHAR(64) NOT NULL,         -- Discord user ID
     vote_value      VARCHAR(100) NOT NULL,        -- 'yes', 'no', 'abstain', or governance option text
     weight          DECIMAL(18,4) NOT NULL DEFAULT 1.0,  -- Respect-weighted vote power
@@ -70,73 +86,16 @@ CREATE TABLE proposal_votes (
     UNIQUE(proposal_id, voter_id)                 -- one vote per user per proposal
 );
 
-CREATE INDEX idx_proposal_votes_proposal ON proposal_votes(proposal_id);
-CREATE INDEX idx_proposal_votes_voter ON proposal_votes(voter_id);
+CREATE INDEX IF NOT EXISTS idx_discord_proposal_votes_proposal ON discord_proposal_votes(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_discord_proposal_votes_voter ON discord_proposal_votes(voter_id);
 
-COMMENT ON TABLE proposal_votes IS 'Individual Respect-weighted votes on proposals. UNIQUE constraint enforces one vote per user; re-voting UPSERTs.';
-
--- ──────────────────────────────────────────────────────────────
--- PROPOSAL INDEX MESSAGE (bot metadata)
--- ──────────────────────────────────────────────────────────────
--- The bot maintains a pinned "index" embed in the proposals channel.
--- We store its message ID in a simple key-value metadata table.
-
-CREATE TABLE bot_metadata (
-    key             VARCHAR(100) PRIMARY KEY,
-    value           TEXT,
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-COMMENT ON TABLE bot_metadata IS 'Key-value store for bot-level config (e.g., proposals index message ID).';
+COMMENT ON TABLE discord_proposal_votes IS 'Individual Respect-weighted votes on Discord proposals. UNIQUE constraint enforces one vote per user; re-voting UPSERTs.';
 
 -- ──────────────────────────────────────────────────────────────
--- FRACTAL HISTORY (sessions)
+-- 4. DISCORD INTROS
 -- ──────────────────────────────────────────────────────────────
 
-CREATE TABLE fractal_sessions (
-    id              BIGSERIAL PRIMARY KEY,
-    group_name      VARCHAR(255) NOT NULL,
-    facilitator_id  VARCHAR(64) NOT NULL,         -- Discord user ID
-    facilitator_name VARCHAR(255) NOT NULL,
-    fractal_number  VARCHAR(100),                 -- e.g. '92', 'March 9', 'Feb 23rd'
-    group_number    VARCHAR(100),                 -- e.g. '1', '2', '3'
-    guild_id        VARCHAR(64) NOT NULL,
-    thread_id       VARCHAR(64),
-    completed_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX idx_fractal_sessions_facilitator ON fractal_sessions(facilitator_id);
-CREATE INDEX idx_fractal_sessions_completed ON fractal_sessions(completed_at DESC);
-CREATE INDEX idx_fractal_sessions_fractal_number ON fractal_sessions(fractal_number);
-
-COMMENT ON TABLE fractal_sessions IS 'Completed fractal meeting sessions. Rankings are in a separate table.';
-
--- ──────────────────────────────────────────────────────────────
--- FRACTAL RANKINGS (normalized out of embedded JSON array)
--- ──────────────────────────────────────────────────────────────
-
-CREATE TABLE fractal_rankings (
-    id              BIGSERIAL PRIMARY KEY,
-    session_id      BIGINT NOT NULL REFERENCES fractal_sessions(id) ON DELETE CASCADE,
-    user_id         VARCHAR(64) NOT NULL,         -- Discord user ID
-    display_name    VARCHAR(255) NOT NULL,
-    level           INTEGER NOT NULL,             -- 6 = 1st place, 1 = 6th place
-    respect         INTEGER NOT NULL DEFAULT 0,   -- Respect points awarded
-    rank_position   INTEGER NOT NULL,             -- 1-indexed position (1 = highest level)
-    UNIQUE(session_id, user_id)
-);
-
-CREATE INDEX idx_fractal_rankings_session ON fractal_rankings(session_id);
-CREATE INDEX idx_fractal_rankings_user ON fractal_rankings(user_id);
-CREATE INDEX idx_fractal_rankings_respect ON fractal_rankings(respect DESC);
-
-COMMENT ON TABLE fractal_rankings IS 'Per-participant rankings within each fractal session. Level 6 = 1st place (110 Respect).';
-
--- ──────────────────────────────────────────────────────────────
--- INTROS (cached member introductions)
--- ──────────────────────────────────────────────────────────────
-
-CREATE TABLE intros (
+CREATE TABLE IF NOT EXISTS discord_intros (
     id              BIGSERIAL PRIMARY KEY,
     discord_id      VARCHAR(64) NOT NULL UNIQUE,
     intro_text      TEXT NOT NULL,
@@ -145,15 +104,15 @@ CREATE TABLE intros (
     cached_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_intros_discord_id ON intros(discord_id);
+CREATE INDEX IF NOT EXISTS idx_discord_intros_discord_id ON discord_intros(discord_id);
 
-COMMENT ON TABLE intros IS 'Cached introductions from the #intros Discord channel.';
+COMMENT ON TABLE discord_intros IS 'Cached introductions from the #intros Discord channel.';
 
 -- ──────────────────────────────────────────────────────────────
--- EVENTS (recurring scheduled events)
+-- 5. DISCORD EVENTS
 -- ──────────────────────────────────────────────────────────────
 
-CREATE TABLE events (
+CREATE TABLE IF NOT EXISTS discord_events (
     id              BIGSERIAL PRIMARY KEY,
     slug            VARCHAR(255) NOT NULL UNIQUE,  -- URL-safe key (e.g. 'weekly-fractal')
     name            VARCHAR(255) NOT NULL,
@@ -162,19 +121,19 @@ CREATE TABLE events (
     timezone        VARCHAR(100) NOT NULL DEFAULT 'UTC',
     channel_id      VARCHAR(64) NOT NULL,          -- Discord channel for reminders
     created_by      VARCHAR(64) NOT NULL,          -- Discord user who created it
-    last_reminded_24h VARCHAR(64),                 -- ISO timestamp of last 24h reminder occurrence
+    last_reminded_24h VARCHAR(64),                 -- ISO timestamp of last 24h reminder
     last_reminded_6h  VARCHAR(64),
     last_reminded_1h  VARCHAR(64),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE events IS 'Recurring weekly events with automatic Discord reminders at 24h, 6h, and 1h.';
+COMMENT ON TABLE discord_events IS 'Recurring weekly events with automatic Discord reminders at 24h, 6h, and 1h.';
 
 -- ──────────────────────────────────────────────────────────────
--- HATS ROLE MAPPINGS
+-- 6. DISCORD HATS ROLE MAPPINGS
 -- ──────────────────────────────────────────────────────────────
 
-CREATE TABLE hats_role_mappings (
+CREATE TABLE IF NOT EXISTS discord_hats_role_mappings (
     id              BIGSERIAL PRIMARY KEY,
     hat_id_hex      VARCHAR(66) NOT NULL UNIQUE,   -- 0x-prefixed 64-char hex hat ID
     role_id         VARCHAR(64) NOT NULL,           -- Discord role snowflake
@@ -182,31 +141,42 @@ CREATE TABLE hats_role_mappings (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-COMMENT ON TABLE hats_role_mappings IS 'Maps Hats Protocol onchain hat IDs to Discord roles for automatic role sync.';
+COMMENT ON TABLE discord_hats_role_mappings IS 'Maps Hats Protocol onchain hat IDs to Discord roles for automatic role sync.';
 
 -- ──────────────────────────────────────────────────────────────
--- VIEWS (useful pre-built queries)
+-- 7. DISCORD BOT METADATA
 -- ──────────────────────────────────────────────────────────────
 
--- Cumulative Respect leaderboard
+CREATE TABLE IF NOT EXISTS discord_bot_metadata (
+    key             VARCHAR(100) PRIMARY KEY,
+    value           TEXT,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE discord_bot_metadata IS 'Key-value store for bot-level config (e.g., proposals index message ID).';
+
+-- ──────────────────────────────────────────────────────────────
+-- 8. VIEWS
+-- ──────────────────────────────────────────────────────────────
+
+-- Cumulative Respect leaderboard (reads from ZAO OS fractal_scores)
 CREATE OR REPLACE VIEW respect_leaderboard AS
 SELECT
-    r.user_id,
-    r.display_name,
-    SUM(r.respect) AS total_respect,
-    COUNT(*) AS participations,
-    COUNT(*) FILTER (WHERE r.rank_position = 1) AS first_place,
-    COUNT(*) FILTER (WHERE r.rank_position = 2) AS second_place,
-    COUNT(*) FILTER (WHERE r.rank_position = 3) AS third_place,
-    RANK() OVER (ORDER BY SUM(r.respect) DESC) AS rank
-FROM fractal_rankings r
-JOIN fractal_sessions s ON s.id = r.session_id
-GROUP BY r.user_id, r.display_name
+    s.discord_id,
+    s.member_name,
+    SUM(s.score)          AS total_respect,
+    COUNT(*)              AS participations,
+    COUNT(*) FILTER (WHERE s.rank = 1) AS first_place,
+    COUNT(*) FILTER (WHERE s.rank = 2) AS second_place,
+    COUNT(*) FILTER (WHERE s.rank = 3) AS third_place,
+    RANK() OVER (ORDER BY SUM(s.score) DESC) AS leaderboard_rank
+FROM fractal_scores s
+GROUP BY s.discord_id, s.member_name
 ORDER BY total_respect DESC;
 
-COMMENT ON VIEW respect_leaderboard IS 'Pre-aggregated cumulative Respect leaderboard across all fractal sessions.';
+COMMENT ON VIEW respect_leaderboard IS 'Pre-aggregated cumulative Respect leaderboard across all fractal sessions (reads ZAO OS fractal_scores).';
 
--- Active proposals with vote summary
+-- Active proposals with vote summary (reads from discord_proposals)
 CREATE OR REPLACE VIEW active_proposals_summary AS
 SELECT
     p.id,
@@ -214,56 +184,48 @@ SELECT
     p.proposal_type,
     p.status,
     p.created_at,
-    COUNT(v.id) AS total_votes,
-    SUM(v.weight) AS total_weight,
-    COUNT(v.id) FILTER (WHERE v.vote_value = 'yes') AS yes_count,
+    COUNT(v.id)       AS total_votes,
+    SUM(v.weight)     AS total_weight,
+    COUNT(v.id) FILTER (WHERE v.vote_value = 'yes')  AS yes_count,
     SUM(v.weight) FILTER (WHERE v.vote_value = 'yes') AS yes_weight,
-    COUNT(v.id) FILTER (WHERE v.vote_value = 'no') AS no_count,
-    SUM(v.weight) FILTER (WHERE v.vote_value = 'no') AS no_weight
-FROM proposals p
-LEFT JOIN proposal_votes v ON v.proposal_id = p.id
+    COUNT(v.id) FILTER (WHERE v.vote_value = 'no')   AS no_count,
+    SUM(v.weight) FILTER (WHERE v.vote_value = 'no')  AS no_weight
+FROM discord_proposals p
+LEFT JOIN discord_proposal_votes v ON v.proposal_id = p.id
 WHERE p.status = 'active'
 GROUP BY p.id;
 
-COMMENT ON VIEW active_proposals_summary IS 'Active proposals with aggregated vote counts and Respect-weighted tallies.';
+COMMENT ON VIEW active_proposals_summary IS 'Active Discord proposals with aggregated vote counts and Respect-weighted tallies.';
 
 -- ──────────────────────────────────────────────────────────────
--- ROW LEVEL SECURITY (RLS)
+-- 9. ROW LEVEL SECURITY (RLS)
 -- ──────────────────────────────────────────────────────────────
--- Enable RLS on all tables. The bot uses the service_role key
+-- Enable RLS on all discord_ tables. The bot uses the service_role key
 -- (bypasses RLS). The web app uses the anon key with these policies.
 
-ALTER TABLE wallets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE proposals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE proposal_votes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE fractal_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE fractal_rankings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE intros ENABLE ROW LEVEL SECURITY;
-ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hats_role_mappings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE bot_metadata ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discord_proposals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discord_proposal_votes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discord_intros ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discord_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discord_hats_role_mappings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discord_bot_metadata ENABLE ROW LEVEL SECURITY;
 
 -- Public read access for dashboard (anon key)
-CREATE POLICY "Public read" ON proposals FOR SELECT USING (true);
-CREATE POLICY "Public read" ON proposal_votes FOR SELECT USING (true);
-CREATE POLICY "Public read" ON fractal_sessions FOR SELECT USING (true);
-CREATE POLICY "Public read" ON fractal_rankings FOR SELECT USING (true);
-CREATE POLICY "Public read" ON intros FOR SELECT USING (true);
-CREATE POLICY "Public read" ON events FOR SELECT USING (true);
-CREATE POLICY "Public read" ON hats_role_mappings FOR SELECT USING (true);
-CREATE POLICY "Public read" ON wallets FOR SELECT USING (true);
-
--- Bot metadata: read-only for anon
-CREATE POLICY "Public read" ON bot_metadata FOR SELECT USING (true);
+CREATE POLICY "Public read" ON discord_proposals FOR SELECT USING (true);
+CREATE POLICY "Public read" ON discord_proposal_votes FOR SELECT USING (true);
+CREATE POLICY "Public read" ON discord_intros FOR SELECT USING (true);
+CREATE POLICY "Public read" ON discord_events FOR SELECT USING (true);
+CREATE POLICY "Public read" ON discord_hats_role_mappings FOR SELECT USING (true);
+CREATE POLICY "Public read" ON discord_bot_metadata FOR SELECT USING (true);
 
 -- Authenticated users can vote (the bot handles validation, but this
 -- allows direct web voting in the future)
-CREATE POLICY "Authenticated vote" ON proposal_votes
+CREATE POLICY "Authenticated vote" ON discord_proposal_votes
     FOR INSERT
     WITH CHECK (auth.role() = 'authenticated');
 
 -- ──────────────────────────────────────────────────────────────
--- TRIGGERS: auto-update updated_at
+-- 10. TRIGGERS: auto-update updated_at
 -- ──────────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION update_updated_at()
@@ -274,13 +236,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER wallets_updated_at
-    BEFORE UPDATE ON wallets
+CREATE TRIGGER discord_bot_metadata_updated_at
+    BEFORE UPDATE ON discord_bot_metadata
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ──────────────────────────────────────────────────────────────
--- REALTIME: enable for dashboard live updates
+-- 11. REALTIME: enable for dashboard live updates
 -- ──────────────────────────────────────────────────────────────
 
--- Enable Realtime for live dashboard updates
-ALTER PUBLICATION supabase_realtime ADD TABLE proposals, proposal_votes, fractal_sessions, fractal_rankings;
+ALTER PUBLICATION supabase_realtime ADD TABLE discord_proposals, discord_proposal_votes;

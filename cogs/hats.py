@@ -287,14 +287,14 @@ class HatsRoleMapping:
 
     def set(self, hat_id_hex: str, role_id: int, hat_name: str):
         """Create or update a hat-to-role mapping in Supabase."""
-        self._supabase.table("hats_role_mappings").upsert(
+        self._supabase.table("discord_hats_role_mappings").upsert(
             {"hat_id_hex": hat_id_hex, "role_id": role_id, "hat_name": hat_name},
             on_conflict="hat_id_hex",
         ).execute()
 
     def remove(self, hat_id_hex: str):
         """Remove a hat-to-role mapping if it exists."""
-        self._supabase.table("hats_role_mappings").delete().eq(
+        self._supabase.table("discord_hats_role_mappings").delete().eq(
             "hat_id_hex", hat_id_hex
         ).execute()
 
@@ -304,7 +304,7 @@ class HatsRoleMapping:
         Returns the same format the rest of the code expects:
             { "<hat_id_hex>": {"role_id": <int>, "hat_name": "<str>"}, ... }
         """
-        result = self._supabase.table("hats_role_mappings").select("*").execute()
+        result = self._supabase.table("discord_hats_role_mappings").select("*").execute()
         return {
             row["hat_id_hex"]: {"role_id": row["role_id"], "hat_name": row["hat_name"]}
             for row in (result.data or [])
@@ -312,7 +312,7 @@ class HatsRoleMapping:
 
     def get_role_id(self, hat_id_hex: str) -> int | None:
         """Look up the Discord role ID for a given hat, or None if unmapped."""
-        result = self._supabase.table("hats_role_mappings").select(
+        result = self._supabase.table("discord_hats_role_mappings").select(
             "role_id"
         ).eq("hat_id_hex", hat_id_hex).execute()
         if result.data:

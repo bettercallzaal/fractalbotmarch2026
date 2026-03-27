@@ -2,12 +2,12 @@
 Wallet registration and ENS resolution cog for the ZAO Fractal Bot.
 
 Provides two lookup tables that map Discord users to Ethereum wallet addresses,
-both stored in the Supabase ``wallets`` table:
+backed by the ZAO OS ``users`` and ``respect_members`` Supabase tables:
 
-1. **Discord ID wallets** (``source='discord_id'``) -- permanent links created
-   via ``/register`` or ``/admin_register``.  Keyed by Discord snowflake ID.
-2. **Name wallets** (``source='name'``) -- pre-populated list of
-   display-name-to-wallet mappings used as a fallback.  These are "fragile"
+1. **Discord ID wallets** -- permanent links created via ``/register`` or
+   ``/admin_register``.  Stored in ``users.discord_id`` / ``users.primary_wallet``.
+2. **Name wallets** -- pre-populated name-to-wallet mappings from the
+   ``respect_members`` table, used as a fallback.  These are "fragile"
    because they break when a user changes their Discord name.
 
 The ``WalletRegistry`` class is attached to the bot instance so other cogs
@@ -184,10 +184,10 @@ def _namehash(name: str) -> str:
 class WalletRegistry:
     """Two-tier lookup from Discord users to Ethereum wallet addresses.
 
-    Tier 1 (permanent): Discord snowflake ID -> wallet, stored in the ``wallets``
-    Supabase table with ``source='discord_id'``.
-    Tier 2 (fragile):   Display name -> wallet, stored in the same table with
-    ``source='name'``.
+    Tier 1 (permanent): Discord snowflake ID -> wallet, stored in the ZAO OS
+    ``users`` table (``discord_id`` / ``primary_wallet`` columns).
+    Tier 2 (fragile):   Display name -> wallet, stored in the ``respect_members``
+    table (``name`` / ``wallet_address`` columns).
 
     ``lookup()`` checks Tier 1 first, then falls back to Tier 2 using the
     member's display name, username, and global name.  Admins can promote
@@ -199,39 +199,70 @@ class WalletRegistry:
         self.sb = get_supabase()
 
     def register(self, discord_id: int, wallet: str) -> None:
-        """Create or update a permanent Discord-ID -> wallet link."""
-        self.sb.table("wallets").upsert(
-            {
-                "discord_id": str(discord_id),
-                "wallet_address": wallet,
-                "source": "discord_id",
-            },
-            on_conflict="discord_id",
+        """Create or update a permanent Discord-ID -> wallet link.
+
+        Strategy:
+        1. If a user row exists with this wallet as primary_wallet, update
+           its discord_id.
+        2. Else if a user row exists with this discord_id, update its
+           primary_wallet.
+        3. Otherwise insert a brand-new user row.
+        """
+        did = str(discord_id)
+        # Try to find existing user by wallet
+        by_wallet = (
+            self.sb.table("users")
+            .select("id")
+            .eq("primary_wallet", wallet)
+            .maybe_single()
+            .execute()
+        )
+        if by_wallet.data:
+            self.sb.table("users").update(
+                {"discord_id": did}
+            ).eq("id", by_wallet.data["id"]).execute()
+            return
+
+        # Try to find existing user by discord_id
+        by_did = (
+            self.sb.table("users")
+            .select("id")
+            .eq("discord_id", did)
+            .maybe_single()
+            .execute()
+        )
+        if by_did.data:
+            self.sb.table("users").update(
+                {"primary_wallet": wallet}
+            ).eq("id", by_did.data["id"]).execute()
+            return
+
+        # No existing user -- insert new row
+        self.sb.table("users").insert(
+            {"discord_id": did, "primary_wallet": wallet}
         ).execute()
 
     def get_by_discord_id(self, discord_id: int) -> str | None:
         """Return wallet for *discord_id*, or ``None`` if not registered."""
         result = (
-            self.sb.table("wallets")
-            .select("wallet_address")
+            self.sb.table("users")
+            .select("primary_wallet")
             .eq("discord_id", str(discord_id))
-            .eq("source", "discord_id")
             .maybe_single()
             .execute()
         )
         if result.data:
-            return result.data["wallet_address"] or None
+            return result.data["primary_wallet"] or None
         return None
 
     def get_by_name(self, display_name: str) -> str | None:
-        """Case-insensitive lookup against the pre-populated name table."""
+        """Case-insensitive lookup against the respect_members name table."""
         if not display_name:
             return None
         result = (
-            self.sb.table("wallets")
+            self.sb.table("respect_members")
             .select("wallet_address")
-            .ilike("display_name", display_name.strip())
-            .eq("source", "name")
+            .ilike("name", display_name.strip())
             .maybe_single()
             .execute()
         )
@@ -268,67 +299,61 @@ class WalletRegistry:
     def get_all_discord(self) -> dict:
         """Return all Discord-ID -> wallet mappings as a dict."""
         result = (
-            self.sb.table("wallets")
-            .select("discord_id, wallet_address")
-            .eq("source", "discord_id")
+            self.sb.table("users")
+            .select("discord_id, primary_wallet")
+            .not_.is_("discord_id", "null")
+            .not_.is_("primary_wallet", "null")
             .execute()
         )
-        return {row["discord_id"]: row["wallet_address"] for row in result.data}
+        return {row["discord_id"]: row["primary_wallet"] for row in result.data}
 
     def get_all_names(self) -> dict:
-        """Return all name -> wallet mappings as a dict."""
+        """Return all name -> wallet mappings from respect_members."""
         result = (
-            self.sb.table("wallets")
-            .select("display_name, wallet_address")
-            .eq("source", "name")
+            self.sb.table("respect_members")
+            .select("name, wallet_address")
             .execute()
         )
-        return {row["display_name"]: row["wallet_address"] for row in result.data}
+        return {row["name"]: row["wallet_address"] for row in result.data}
 
     def add_name_mapping(self, name: str, wallet: str) -> None:
-        """Insert or update a name -> wallet entry."""
-        # Check if a name entry already exists (case-insensitive)
-        existing = (
-            self.sb.table("wallets")
-            .select("id")
-            .ilike("display_name", name.strip())
-            .eq("source", "name")
-            .maybe_single()
-            .execute()
-        )
-        if existing.data:
-            # Update the existing row
-            self.sb.table("wallets").update(
-                {"wallet_address": wallet}
-            ).eq("id", existing.data["id"]).execute()
-        else:
-            # Insert a new name-only row (discord_id left NULL)
-            self.sb.table("wallets").insert(
-                {
-                    "display_name": name,
-                    "wallet_address": wallet,
-                    "source": "name",
-                }
-            ).execute()
+        """Insert or update a name -> wallet entry in respect_members."""
+        self.sb.table("respect_members").upsert(
+            {"name": name.strip(), "wallet_address": wallet},
+            on_conflict="name",
+        ).execute()
+
+    def lock_wallet(self, name: str, discord_id: int) -> bool:
+        """Promote a name-matched wallet to a permanent Discord-ID link.
+
+        Looks up the wallet from respect_members by name, then updates
+        (or creates) the corresponding users row with the discord_id.
+
+        Returns True if a wallet was found and locked, False otherwise.
+        """
+        wallet = self.get_by_name(name)
+        if not wallet:
+            return False
+        self.register(discord_id, wallet)
+        return True
 
     def stats(self) -> dict:
         """Return summary counts for the admin dashboard."""
         discord_result = (
-            self.sb.table("wallets")
+            self.sb.table("users")
             .select("id", count="exact")
-            .eq("source", "discord_id")
+            .not_.is_("discord_id", "null")
+            .not_.is_("primary_wallet", "null")
             .execute()
         )
         name_result = (
-            self.sb.table("wallets")
+            self.sb.table("respect_members")
             .select("id", count="exact")
-            .eq("source", "name")
             .execute()
         )
         empty_wallet_result = (
-            self.sb.table("wallets")
+            self.sb.table("respect_members")
             .select("id", count="exact")
-            .eq("source", "name")
             .or_("wallet_address.is.null,wallet_address.eq.")
             .execute()
         )

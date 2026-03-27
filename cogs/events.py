@@ -111,7 +111,7 @@ class EventsCog(BaseCog):
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
         """Return matching event names for autocomplete fields."""
-        result = self.supabase.table("events").select("slug, name").execute()
+        result = self.supabase.table("discord_events").select("slug, name").execute()
         rows = result.data or []
         return [
             app_commands.Choice(name=row["name"], value=row["slug"])
@@ -170,7 +170,7 @@ class EventsCog(BaseCog):
 
         # Build a slug key from the name
         key = name.lower().replace(" ", "-")
-        existing = self.supabase.table("events").select("id").eq("slug", key).execute()
+        existing = self.supabase.table("discord_events").select("id").eq("slug", key).execute()
         if existing.data:
             await interaction.response.send_message(
                 f"\u274c An event with key `{key}` already exists. Use `/edit_event` or `/cancel_event` first.",
@@ -192,7 +192,7 @@ class EventsCog(BaseCog):
             "last_reminded_6h": None,
             "last_reminded_1h": None,
         }
-        self.supabase.table("events").insert(event).execute()
+        self.supabase.table("discord_events").insert(event).execute()
 
         next_time = _next_occurrence(day.value, time, tz)
         countdown = _format_countdown(next_time - datetime.now(timezone.utc))
@@ -217,7 +217,7 @@ class EventsCog(BaseCog):
     # ------------------------------------------------------------------
     @app_commands.command(name="events", description="List all scheduled recurring events")
     async def list_events(self, interaction: discord.Interaction):
-        result = self.supabase.table("events").select("*").execute()
+        result = self.supabase.table("discord_events").select("*").execute()
         rows = result.data or []
         if not rows:
             await interaction.response.send_message(
@@ -262,7 +262,7 @@ class EventsCog(BaseCog):
             )
             return
 
-        result = self.supabase.table("events").select("name").eq("slug", name).execute()
+        result = self.supabase.table("discord_events").select("name").eq("slug", name).execute()
         if not result.data:
             await interaction.response.send_message(
                 f"\u274c No event found with key `{name}`.", ephemeral=True
@@ -270,7 +270,7 @@ class EventsCog(BaseCog):
             return
 
         event_name = result.data[0]["name"]
-        self.supabase.table("events").delete().eq("slug", name).execute()
+        self.supabase.table("discord_events").delete().eq("slug", name).execute()
 
         embed = discord.Embed(
             title="\U0001f5d1\ufe0f Event Cancelled",
@@ -308,7 +308,7 @@ class EventsCog(BaseCog):
             )
             return
 
-        result = self.supabase.table("events").select("*").eq("slug", name).execute()
+        result = self.supabase.table("discord_events").select("*").eq("slug", name).execute()
         if not result.data:
             await interaction.response.send_message(
                 f"\u274c No event found with key `{name}`.", ephemeral=True
@@ -362,7 +362,7 @@ class EventsCog(BaseCog):
         updates["last_reminded_6h"] = None
         updates["last_reminded_1h"] = None
 
-        self.supabase.table("events").update(updates).eq("slug", name).execute()
+        self.supabase.table("discord_events").update(updates).eq("slug", name).execute()
 
         # Merge updates into ev for the response embed
         ev.update(updates)
@@ -391,7 +391,7 @@ class EventsCog(BaseCog):
         """Check all events and send reminders at 24h, 6h, and 1h before."""
         now = datetime.now(timezone.utc)
 
-        result = self.supabase.table("events").select("*").execute()
+        result = self.supabase.table("discord_events").select("*").execute()
         rows = result.data or []
 
         for ev in rows:
@@ -442,7 +442,7 @@ class EventsCog(BaseCog):
                     self.logger.info(f"[EVENTS] Sent {field} reminder for {ev['slug']} (next: {occurrence_key})")
 
                     # Update just this reminder field in Supabase
-                    self.supabase.table("events").update(
+                    self.supabase.table("discord_events").update(
                         {field: occurrence_key}
                     ).eq("slug", ev["slug"]).execute()
 

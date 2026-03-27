@@ -1,6 +1,10 @@
 """
 One-time migration script: reads all JSON data files and inserts into Supabase.
 
+This script is designed for the ZAO OS shared-table architecture:
+  - users, fractal_sessions, fractal_scores, respect_members already exist
+  - Discord-specific tables are prefixed with discord_
+
 Usage:
     1. Create the Supabase project and run scripts/create_tables.sql in the SQL Editor.
     2. Set environment variables (or add to .env):
@@ -65,53 +69,61 @@ def batch_upsert(table: str, rows: list, on_conflict: str, batch_size: int = 50)
         supabase.table(table).upsert(batch, on_conflict=on_conflict).execute()
 
 
-# ── Wallets ─────────────────────────────────────────────────────
+# ── Wallets -> Update existing users table ──────────────────────
 
 def migrate_wallets():
-    """Migrate wallets.json and names_to_wallets.json into the wallets table."""
-    print("=== Migrating wallets ===")
+    """
+    Migrate wallets.json into the existing ZAO OS `users` table.
 
-    # 1. Discord-ID-keyed wallets (wallets.json)
+    wallets.json maps discord_id -> wallet_address.  For each entry,
+    find the user by wallet address and set their discord_id field.
+
+    names_to_wallets.json data is already in respect_members and does
+    not need migration.
+    """
+    print("=== Migrating wallets (updating users.discord_id) ===")
+
     wallets = load_json("wallets.json") or {}
-    discord_rows = []
-    for discord_id, address in wallets.items():
-        discord_rows.append({
-            "discord_id": discord_id,
-            "wallet_address": address,
-            "source": "discord_id",
-        })
+    if not wallets:
+        print("  No wallets.json data found\n")
+        return
 
-    if discord_rows:
-        batch_upsert("wallets", discord_rows, on_conflict="discord_id")
-        print(f"  Upserted {len(discord_rows)} discord_id wallet rows")
+    updated = 0
+    skipped = 0
 
-    # 2. Name-keyed wallets (names_to_wallets.json)
-    names = load_json("names_to_wallets.json") or {}
-    name_rows = []
-    for name, address in names.items():
-        name_rows.append({
-            "display_name": name,
-            "wallet_address": address or "",
-            "source": "name",
-        })
+    for discord_id, wallet_address in wallets.items():
+        if not wallet_address:
+            skipped += 1
+            continue
 
-    if name_rows:
-        # Name rows have no discord_id so we use display_name for dedup.
-        # Since display_name is not UNIQUE in the schema, we delete-then-insert
-        # for idempotency: first remove all 'name'-source rows, then re-insert.
-        supabase.table("wallets").delete().eq("source", "name").execute()
-        for i in range(0, len(name_rows), 50):
-            batch = name_rows[i : i + 50]
-            supabase.table("wallets").insert(batch).execute()
-        print(f"  Inserted {len(name_rows)} name wallet rows")
+        # Find user by primary_wallet and set their discord_id
+        # Using case-insensitive match since wallet addresses may differ in case
+        try:
+            result = (
+                supabase.table("users")
+                .update({"discord_id": discord_id})
+                .ilike("primary_wallet", wallet_address)
+                .execute()
+            )
+            if result.data:
+                updated += 1
+            else:
+                # No matching user found for this wallet -- that's OK,
+                # the user may not exist in ZAO OS yet
+                skipped += 1
+        except Exception as e:
+            print(f"  Warning: failed to update user for wallet {wallet_address}: {e}")
+            skipped += 1
 
+    print(f"  Updated {updated} users with discord_id")
+    print(f"  Skipped {skipped} (no matching user or empty wallet)")
     print()
 
 
 # ── Proposals + Votes ───────────────────────────────────────────
 
 def migrate_proposals():
-    """Migrate proposals.json into proposals + proposal_votes tables."""
+    """Migrate proposals.json into discord_proposals + discord_proposal_votes tables."""
     print("=== Migrating proposals ===")
 
     data = load_json("proposals.json")
@@ -119,10 +131,10 @@ def migrate_proposals():
         print("  No proposals data found\n")
         return
 
-    # Store the _index_message_id in bot_metadata
+    # Store the _index_message_id in discord_bot_metadata
     index_msg_id = data.get("_index_message_id")
     if index_msg_id:
-        supabase.table("bot_metadata").upsert({
+        supabase.table("discord_bot_metadata").upsert({
             "key": "proposals_index_message_id",
             "value": str(index_msg_id),
         }, on_conflict="key").execute()
@@ -137,7 +149,7 @@ def migrate_proposals():
             "id": int(pid),
             "title": p["title"],
             "description": p.get("description"),
-            "proposal_type": p["type"],
+            "proposal_type": p.get("type", "text"),
             "author_id": p["author_id"],
             "thread_id": p.get("thread_id"),
             "message_id": p.get("message_id"),
@@ -149,9 +161,9 @@ def migrate_proposals():
             "created_at": p["created_at"],
             "closed_at": p.get("closed_at"),
         }
-        supabase.table("proposals").upsert(row, on_conflict="id").execute()
+        supabase.table("discord_proposals").upsert(row, on_conflict="id").execute()
 
-        # Normalize embedded votes dict into proposal_votes rows
+        # Normalize embedded votes dict into discord_proposal_votes rows
         votes = p.get("votes", {})
         vote_rows = []
         for voter_id, vote_data in votes.items():
@@ -169,25 +181,37 @@ def migrate_proposals():
             })
 
         if vote_rows:
-            supabase.table("proposal_votes").upsert(
+            supabase.table("discord_proposal_votes").upsert(
                 vote_rows, on_conflict="proposal_id,voter_id"
             ).execute()
             vote_count += len(vote_rows)
 
-    print(f"  Upserted {len(proposals)} proposals")
-    print(f"  Upserted {vote_count} proposal votes")
+    print(f"  Upserted {len(proposals)} proposals into discord_proposals")
+    print(f"  Upserted {vote_count} votes into discord_proposal_votes")
 
     # Remind user to reset the sequence
     next_id = data.get("next_id", max((int(k) for k in proposals), default=0) + 1)
-    print(f"  NOTE: Run this SQL to reset the proposals sequence:")
-    print(f"    SELECT setval('proposals_id_seq', {next_id}, false);")
+    print(f"  NOTE: Run this SQL to reset the discord_proposals sequence:")
+    print(f"    SELECT setval('discord_proposals_id_seq', {next_id}, false);")
     print()
 
 
 # ── Fractal History ─────────────────────────────────────────────
 
 def migrate_history():
-    """Migrate history.json into fractal_sessions + fractal_rankings tables."""
+    """
+    Migrate history.json into the EXISTING ZAO OS tables:
+      - fractal_sessions (using new columns: thread_id, facilitator_discord_id,
+        group_number, guild_id, completed_at)
+      - fractal_scores (using new columns: discord_id, level, respect_points)
+
+    The bot's history.json uses integer IDs. The ZAO OS fractal_sessions uses
+    UUID primary keys.  We insert new rows with generated UUIDs and store the
+    Discord-specific metadata in the new columns.
+
+    For idempotency, we check for existing sessions by matching on
+    thread_id (unique per Discord thread).
+    """
     print("=== Migrating fractal history ===")
 
     data = load_json("history.json")
@@ -196,56 +220,113 @@ def migrate_history():
         return
 
     fractals = data.get("fractals", [])
-    ranking_count = 0
+    session_count = 0
+    score_count = 0
 
     for f in fractals:
-        # Insert session
-        session_row = {
-            "id": f["id"],
-            "group_name": f["group_name"],
-            "facilitator_id": str(f["facilitator_id"]),
-            "facilitator_name": f["facilitator_name"],
-            "fractal_number": f.get("fractal_number"),
-            "group_number": f.get("group_number"),
-            "guild_id": str(f["guild_id"]),
-            "thread_id": str(f.get("thread_id", "")),
-            "completed_at": f["completed_at"],
-        }
-        supabase.table("fractal_sessions").upsert(
-            session_row, on_conflict="id"
-        ).execute()
+        thread_id = str(f.get("thread_id", ""))
+        facilitator_discord_id = str(f["facilitator_id"])
+        group_number = f.get("group_number")
+        guild_id = str(f["guild_id"])
+        completed_at = f["completed_at"]
+        fractal_number = f.get("fractal_number", "")
+        group_name = f["group_name"]
+        facilitator_name = f["facilitator_name"]
 
-        # Normalize embedded rankings array into fractal_rankings rows
+        # Check if this session already exists (by thread_id)
+        existing = None
+        if thread_id:
+            result = (
+                supabase.table("fractal_sessions")
+                .select("id")
+                .eq("thread_id", thread_id)
+                .execute()
+            )
+            if result.data:
+                existing = result.data[0]
+
+        if existing:
+            # Update existing session with Discord-specific fields
+            session_id = existing["id"]
+            supabase.table("fractal_sessions").update({
+                "facilitator_discord_id": facilitator_discord_id,
+                "group_number": group_number,
+                "guild_id": guild_id,
+                "completed_at": completed_at,
+            }).eq("id", session_id).execute()
+        else:
+            # Insert new session row
+            session_row = {
+                "name": group_name,
+                "host_name": facilitator_name,
+                "thread_id": thread_id,
+                "facilitator_discord_id": facilitator_discord_id,
+                "group_number": group_number,
+                "guild_id": guild_id,
+                "completed_at": completed_at,
+                "session_date": completed_at,
+                "participant_count": len(f.get("rankings", [])),
+                "notes": f"Migrated from Discord bot history (fractal {fractal_number})",
+            }
+            result = (
+                supabase.table("fractal_sessions")
+                .insert(session_row)
+                .execute()
+            )
+            session_id = result.data[0]["id"]
+
+        session_count += 1
+
+        # Insert/update rankings into fractal_scores
         rankings = f.get("rankings", [])
-        ranking_rows = []
         for i, r in enumerate(rankings):
-            ranking_rows.append({
-                "session_id": f["id"],
-                "user_id": str(r["user_id"]),
-                "display_name": r["display_name"],
-                "level": r["level"],
-                "respect": r.get("respect", 0),
-                "rank_position": i + 1,
-            })
+            discord_id = str(r["user_id"])
+            display_name = r["display_name"]
+            level = r["level"]
+            respect = r.get("respect", 0)
+            rank_position = i + 1  # 1-indexed
 
-        if ranking_rows:
-            supabase.table("fractal_rankings").upsert(
-                ranking_rows, on_conflict="session_id,user_id"
-            ).execute()
-            ranking_count += len(ranking_rows)
+            # Check if score already exists for this session + discord_id
+            existing_score = (
+                supabase.table("fractal_scores")
+                .select("id")
+                .eq("session_id", session_id)
+                .eq("discord_id", discord_id)
+                .execute()
+            )
 
-    max_id = max((f["id"] for f in fractals), default=0)
-    print(f"  Upserted {len(fractals)} fractal sessions")
-    print(f"  Upserted {ranking_count} fractal rankings")
-    print(f"  NOTE: Run this SQL to reset the fractal_sessions sequence:")
-    print(f"    SELECT setval('fractal_sessions_id_seq', {max_id + 1}, false);")
+            if existing_score.data:
+                # Update existing score
+                supabase.table("fractal_scores").update({
+                    "level": level,
+                    "respect_points": respect,
+                    "rank": rank_position,
+                    "member_name": display_name,
+                }).eq("id", existing_score.data[0]["id"]).execute()
+            else:
+                # Insert new score
+                score_row = {
+                    "session_id": session_id,
+                    "discord_id": discord_id,
+                    "member_name": display_name,
+                    "rank": rank_position,
+                    "score": respect,
+                    "level": level,
+                    "respect_points": respect,
+                }
+                supabase.table("fractal_scores").insert(score_row).execute()
+
+            score_count += 1
+
+    print(f"  Upserted {session_count} fractal sessions")
+    print(f"  Upserted {score_count} fractal scores")
     print()
 
 
 # ── Intros ──────────────────────────────────────────────────────
 
 def migrate_intros():
-    """Migrate intros.json into the intros table."""
+    """Migrate intros.json into the discord_intros table."""
     print("=== Migrating intros ===")
 
     data = load_json("intros.json")
@@ -263,17 +344,17 @@ def migrate_intros():
         })
 
     if rows:
-        supabase.table("intros").upsert(
+        supabase.table("discord_intros").upsert(
             rows, on_conflict="discord_id"
         ).execute()
 
-    print(f"  Upserted {len(rows)} intros\n")
+    print(f"  Upserted {len(rows)} intros into discord_intros\n")
 
 
 # ── Events ──────────────────────────────────────────────────────
 
 def migrate_events():
-    """Migrate events.json into the events table."""
+    """Migrate events.json into the discord_events table."""
     print("=== Migrating events ===")
 
     data = load_json("events.json")
@@ -302,17 +383,17 @@ def migrate_events():
         })
 
     if rows:
-        supabase.table("events").upsert(
+        supabase.table("discord_events").upsert(
             rows, on_conflict="slug"
         ).execute()
 
-    print(f"  Upserted {len(rows)} events\n")
+    print(f"  Upserted {len(rows)} events into discord_events\n")
 
 
 # ── Hats Role Mappings ──────────────────────────────────────────
 
 def migrate_hats_roles():
-    """Migrate hats_roles.json into hats_role_mappings table."""
+    """Migrate hats_roles.json into discord_hats_role_mappings table."""
     print("=== Migrating hats role mappings ===")
 
     data = load_json("hats_roles.json")
@@ -329,26 +410,23 @@ def migrate_hats_roles():
         })
 
     if rows:
-        supabase.table("hats_role_mappings").upsert(
+        supabase.table("discord_hats_role_mappings").upsert(
             rows, on_conflict="hat_id_hex"
         ).execute()
 
-    print(f"  Upserted {len(rows)} hat-role mappings\n")
+    print(f"  Upserted {len(rows)} hat-role mappings into discord_hats_role_mappings\n")
 
 
 # ── Bot Metadata ────────────────────────────────────────────────
 
 def migrate_bot_metadata():
-    """Migrate any additional bot metadata (e.g. _index_message_id)."""
+    """Migrate any additional bot metadata into discord_bot_metadata."""
     print("=== Migrating bot metadata ===")
 
-    # The _index_message_id is already handled in migrate_proposals().
-    # This function exists for future metadata entries.
-
-    # Also store next_id for reference
+    # Store next_id for reference (index_message_id handled in migrate_proposals)
     data = load_json("proposals.json")
     if data and "next_id" in data:
-        supabase.table("bot_metadata").upsert({
+        supabase.table("discord_bot_metadata").upsert({
             "key": "proposals_next_id",
             "value": str(data["next_id"]),
         }, on_conflict="key").execute()
@@ -362,6 +440,7 @@ def migrate_bot_metadata():
 def main():
     print("=" * 60)
     print("ZAO Fractal Bot -> Supabase Migration")
+    print("(ZAO OS shared-table architecture)")
     print("=" * 60)
     print(f"Supabase URL: {SUPABASE_URL}")
     print(f"Data dir:     {DATA_DIR}")

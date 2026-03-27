@@ -223,7 +223,7 @@ class ProposalStore:
 
     def _fetch_votes(self, proposal_id: str) -> list[dict]:
         """Fetch all vote rows for a given proposal from Supabase."""
-        resp = self.sb.table('proposal_votes') \
+        resp = self.sb.table('discord_proposal_votes') \
             .select('voter_id, vote_value, weight') \
             .eq('proposal_id', int(proposal_id)) \
             .execute()
@@ -232,7 +232,7 @@ class ProposalStore:
     @property
     def index_message_id(self) -> int | None:
         """Get the Discord message ID of the pinned active-proposals index embed."""
-        resp = self.sb.table('bot_metadata') \
+        resp = self.sb.table('discord_bot_metadata') \
             .select('value') \
             .eq('key', 'proposals_index_message_id') \
             .execute()
@@ -244,7 +244,7 @@ class ProposalStore:
     def index_message_id(self, value: int | None):
         """Set (and persist) the Discord message ID of the pinned index embed."""
         str_val = str(value) if value else None
-        self.sb.table('bot_metadata').upsert({
+        self.sb.table('discord_bot_metadata').upsert({
             'key': 'proposals_index_message_id',
             'value': str_val,
         }, on_conflict='key').execute()
@@ -287,7 +287,7 @@ class ProposalStore:
         if funding_amount is not None:
             row_data['funding_amount'] = funding_amount
 
-        resp = self.sb.table('proposals').insert(row_data).execute()
+        resp = self.sb.table('discord_proposals').insert(row_data).execute()
         row = resp.data[0]
         return self._row_to_proposal(row, votes_rows=[])
 
@@ -297,7 +297,7 @@ class ProposalStore:
         Returns the proposal dict with a populated ``votes`` sub-dict,
         or None if not found.
         """
-        resp = self.sb.table('proposals') \
+        resp = self.sb.table('discord_proposals') \
             .select('*') \
             .eq('id', int(proposal_id)) \
             .execute()
@@ -308,7 +308,7 @@ class ProposalStore:
 
     def get_active(self) -> list[dict]:
         """Return all proposals with status 'active', each with its votes."""
-        resp = self.sb.table('proposals') \
+        resp = self.sb.table('discord_proposals') \
             .select('*') \
             .eq('status', 'active') \
             .execute()
@@ -336,14 +336,14 @@ class ProposalStore:
             True if the vote was recorded, False if the proposal is closed or missing.
         """
         # Check proposal exists and is active
-        resp = self.sb.table('proposals') \
+        resp = self.sb.table('discord_proposals') \
             .select('status') \
             .eq('id', int(proposal_id)) \
             .execute()
         if not resp.data or resp.data[0]['status'] != 'active':
             return False
 
-        self.sb.table('proposal_votes').upsert({
+        self.sb.table('discord_proposal_votes').upsert({
             'proposal_id': int(proposal_id),
             'voter_id': str(user_id),
             'vote_value': value,
@@ -353,7 +353,7 @@ class ProposalStore:
 
     def close(self, proposal_id: str) -> dict | None:
         """Close a proposal, preventing further votes. Returns the proposal or None."""
-        resp = self.sb.table('proposals') \
+        resp = self.sb.table('discord_proposals') \
             .update({
                 'status': 'closed',
                 'closed_at': datetime.now(timezone.utc).isoformat(),
@@ -371,7 +371,7 @@ class ProposalStore:
         Resets status to 'active', sets created_at to now, and clears closed_at.
         Returns the updated proposal dict or None if not found.
         """
-        resp = self.sb.table('proposals') \
+        resp = self.sb.table('discord_proposals') \
             .update({
                 'status': 'active',
                 'created_at': datetime.now(timezone.utc).isoformat(),
@@ -386,7 +386,7 @@ class ProposalStore:
 
     def delete(self, proposal_id: str) -> bool:
         """Permanently remove a proposal (cascade deletes its votes). Returns True if deleted."""
-        resp = self.sb.table('proposals') \
+        resp = self.sb.table('discord_proposals') \
             .delete() \
             .eq('id', int(proposal_id)) \
             .execute()
@@ -416,7 +416,7 @@ class ProposalStore:
 
         Used by admin_recover_proposals to identify which threads are already tracked.
         """
-        resp = self.sb.table('proposals') \
+        resp = self.sb.table('discord_proposals') \
             .select('thread_id') \
             .execute()
         return {str(row['thread_id']) for row in (resp.data or [])}
@@ -448,7 +448,7 @@ class ProposalStore:
         if status == 'closed':
             row_data['closed_at'] = datetime.now(timezone.utc).isoformat()
 
-        resp = self.sb.table('proposals').insert(row_data).execute()
+        resp = self.sb.table('discord_proposals').insert(row_data).execute()
         return self._row_to_proposal(resp.data[0], votes_rows=[])
 
 

@@ -91,7 +91,7 @@ class IntroCache:
             or None if no intro is cached for this user.
         """
         result = (
-            self.sb.table("intros")
+            self.sb.table("discord_intros")
             .select("*")
             .eq("discord_id", str(discord_id))
             .maybe_single()
@@ -110,7 +110,7 @@ class IntroCache:
             message_id: The Discord message snowflake ID.
             timestamp: ISO-8601 formatted creation timestamp.
         """
-        self.sb.table("intros").upsert(
+        self.sb.table("discord_intros").upsert(
             {
                 "discord_id": str(discord_id),
                 "intro_text": text,
@@ -122,13 +122,13 @@ class IntroCache:
 
     def clear(self):
         """Remove all cached entries from Supabase."""
-        self.sb.table("intros").delete().neq("id", 0).execute()
+        self.sb.table("discord_intros").delete().neq("id", 0).execute()
 
     @property
     def size(self) -> int:
         """Return the number of cached introductions."""
         result = (
-            self.sb.table("intros")
+            self.sb.table("discord_intros")
             .select("id", count="exact")
             .execute()
         )
