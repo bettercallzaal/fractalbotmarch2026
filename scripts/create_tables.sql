@@ -159,22 +159,8 @@ COMMENT ON TABLE discord_bot_metadata IS 'Key-value store for bot-level config (
 -- 8. VIEWS
 -- ──────────────────────────────────────────────────────────────
 
--- Cumulative Respect leaderboard (reads from ZAO OS fractal_scores)
-CREATE OR REPLACE VIEW respect_leaderboard AS
-SELECT
-    s.discord_id,
-    s.member_name,
-    SUM(s.score)          AS total_respect,
-    COUNT(*)              AS participations,
-    COUNT(*) FILTER (WHERE s.rank = 1) AS first_place,
-    COUNT(*) FILTER (WHERE s.rank = 2) AS second_place,
-    COUNT(*) FILTER (WHERE s.rank = 3) AS third_place,
-    RANK() OVER (ORDER BY SUM(s.score) DESC) AS leaderboard_rank
-FROM fractal_scores s
-GROUP BY s.discord_id, s.member_name
-ORDER BY total_respect DESC;
-
-COMMENT ON VIEW respect_leaderboard IS 'Pre-aggregated cumulative Respect leaderboard across all fractal sessions (reads ZAO OS fractal_scores).';
+-- NOTE: respect_leaderboard already exists in ZAO OS (managed there).
+-- FractalBot uses respect_members table directly for leaderboard data.
 
 -- Active proposals with vote summary (reads from discord_proposals)
 CREATE OR REPLACE VIEW active_proposals_summary AS
@@ -228,6 +214,7 @@ CREATE POLICY "Authenticated vote" ON discord_proposal_votes
 -- 10. TRIGGERS: auto-update updated_at
 -- ──────────────────────────────────────────────────────────────
 
+-- update_updated_at() likely already exists in ZAO OS; CREATE OR REPLACE is safe
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
