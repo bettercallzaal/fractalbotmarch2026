@@ -530,16 +530,16 @@ class FractalGroup:
                     respect = fibonacci[i] if i < len(fibonacci) else 0
                     rankings_lines.append(f"{medal} {winner.mention}  —  **+{respect} Respect**")
 
-                # Build the submitBreakout URL so members can confirm results onchain.
-                # URL format: /submitBreakout?groupnumber=N&vote1=WALLET&vote2=WALLET&...
-                # where vote1 = highest ranked member's wallet, vote2 = second, etc.
+                # Check if auto-submit already succeeded (set by _post_submit_breakout)
+                auto_tx_hash = getattr(self, '_auto_submit_tx_hash', None)
+
+                # Build the submitBreakout URL as a fallback or for reference.
                 submit_url = None
                 registry = getattr(self.cog.bot, 'wallet_registry', None)
                 if registry:
                     params = {'groupnumber': getattr(self, 'group_number', '1')}
                     for i, member in enumerate(final_ranking):
                         wallet = registry.lookup(member)
-                        # Empty string for members who haven't registered a wallet
                         params[f'vote{i+1}'] = wallet if wallet else ''
                     submit_url = f"https://zao.frapps.xyz/submitBreakout?{urlencode(params)}"
 
@@ -553,25 +553,38 @@ class FractalGroup:
                     color=0x57F287
                 )
 
-                # Only add the onchain submission field if wallet lookups succeeded
-                # (registry was available and at least one wallet was found)
-                if submit_url:
+                if auto_tx_hash:
+                    # Results were already submitted onchain automatically
+                    explorer_url = f"https://optimistic.etherscan.io/tx/{auto_tx_hash}"
+                    embed.add_field(
+                        name="⛓️ Submitted Onchain",
+                        value=f"**[View transaction on Optimism]({explorer_url})**",
+                        inline=False,
+                    )
+                    embed.set_footer(text="ZAO Fractal • Auto-submitted via bot wallet")
+                elif submit_url:
                     embed.add_field(
                         name="🗳️ Submit Results Onchain",
                         value=f"**[Click here to vote and confirm results]({submit_url})**",
                         inline=False
                     )
-
-                # Brand footer shown at the bottom of every results embed
-                embed.set_footer(text="ZAO Fractal • zao.frapps.xyz")
+                    embed.set_footer(text="ZAO Fractal • zao.frapps.xyz")
+                else:
+                    embed.set_footer(text="ZAO Fractal • zao.frapps.xyz")
 
                 # Post the embed to the general channel with @mentions for all
                 # fractal members so they get a notification outside the thread
                 mentions = " ".join([m.mention for m in self.members])
-                await general_channel.send(
-                    content=f"🏆 **Fractal complete!** {mentions} — go vote to submit results onchain! 👇",
-                    embed=embed
-                )
+                if auto_tx_hash:
+                    await general_channel.send(
+                        content=f"🏆 **Fractal complete!** {mentions} — results submitted onchain! ⛓️",
+                        embed=embed
+                    )
+                else:
+                    await general_channel.send(
+                        content=f"🏆 **Fractal complete!** {mentions} — go vote to submit results onchain! 👇",
+                        embed=embed
+                    )
 
         except Exception as e:
             self.logger.error(f"Failed to post results to general channel: {e}")
@@ -584,12 +597,13 @@ class FractalGroup:
         self.logger.info(f"Fractal group '{self.thread.name}' completed")
 
     async def _post_submit_breakout(self, final_ranking):
-        """Build and post the onchain submission link to the fractal thread.
+        """Submit breakout results onchain (auto-sign) or post a manual link.
 
-        Constructs a URL to ``zao.frapps.xyz/submitBreakout`` with query
-        parameters mapping each rank position (vote1..voteN) to the
-        member's registered Ethereum wallet address.  Members without a
-        linked wallet are included as empty params and flagged in the embed.
+        If ``BOT_PRIVATE_KEY`` is configured, the bot signs and broadcasts
+        the ``submitBreakout`` transaction automatically.  On success it
+        posts the tx hash with an Optimism explorer link.  If auto-submit
+        fails or is not configured, falls back to constructing the manual
+        URL to ``zao.frapps.xyz/submitBreakout``.
 
         Args:
             final_ranking: Ordered list of discord.Member from highest to
@@ -603,9 +617,6 @@ class FractalGroup:
                 return
 
             # Look up Ethereum wallet addresses for each ranked member.
-            # wallet_params accumulates raw key=value pairs (legacy, kept for logging).
-            # ranked_wallets pairs each (member, wallet_or_None) for URL + display.
-            # missing collects display names of members without a linked wallet.
             wallet_params = []
             missing = []
             ranked_wallets = []
@@ -623,59 +634,125 @@ class FractalGroup:
             # creates the session. Falls back to '1' if unset (single-group fractal).
             group_number = getattr(self, 'group_number', '1')
 
-            # Build the URL using urlencode for proper percent-encoding of wallet addresses.
-            # Final URL looks like: /submitBreakout?groupnumber=1&vote1=0xABC...&vote2=0xDEF...
-            base_url = "https://zao.frapps.xyz/submitBreakout"
-            url_params = {'groupnumber': group_number}
-            for i, (member, wallet) in enumerate(ranked_wallets):
-                url_params[f'vote{i+1}'] = wallet if wallet else ''
-            submit_url = f"{base_url}?{urlencode(url_params)}"
-
             # Build rankings text showing truncated wallet addresses next to each member
-            from config.config import RESPECT_POINTS
-            fibonacci = RESPECT_POINTS  # Fibonacci-like Respect point distribution
+            from config.config import RESPECT_POINTS, BOT_PRIVATE_KEY
+            fibonacci = RESPECT_POINTS
             rankings_lines = []
             for i, (member, wallet) in enumerate(ranked_wallets):
                 respect = fibonacci[i] if i < len(fibonacci) else 0
-                # Show first 6 and last 4 chars of the wallet for readability (e.g. 0x1234...abcd)
                 short = f"`{wallet[:6]}...{wallet[-4:]}`" if wallet else "⚠️ missing"
                 rankings_lines.append(f"**{i+1}.** {member.mention} → {short} (+{respect} Respect)")
 
-            # Post the embed to the fractal thread. The embed URL is set to the
-            # submitBreakout link so clicking the embed title opens the submission page.
-            # Color 0x57F287 is Discord's green for success/positive outcomes.
-            embed = discord.Embed(
-                title="🗳️ Submit Results Onchain",
-                description=(
-                    "**Fractal complete! Now submit these rankings onchain to earn Respect.**\n\n"
-                    + "\n".join(rankings_lines)
-                ),
-                color=0x57F287,
-                url=submit_url
-            )
+            # ── Attempt auto-submit if BOT_PRIVATE_KEY is set ──────────────
+            auto_submitted = False
+            tx_hash = None
 
-            # If any members have not linked a wallet via /register, add a warning
-            # field so they know they need to register before results can be submitted.
-            if missing:
-                embed.add_field(
-                    name="⚠️ Missing Wallets",
-                    value=f"{', '.join(missing)} — use `/register 0xYourAddress` to link",
-                    inline=False
+            if BOT_PRIVATE_KEY and not missing:
+                # All members have wallets -- we can auto-submit
+                from utils.blockchain import submit_breakout
+
+                address_list = [w for (_, w) in ranked_wallets]
+                try:
+                    group_num_int = int(group_number)
+                except (ValueError, TypeError):
+                    group_num_int = 1
+
+                tx_hash = await submit_breakout(
+                    ranked_addresses=address_list,
+                    group_num=group_num_int,
                 )
 
-            embed.set_footer(text="ZAO Fractal • zao.frapps.xyz")
+                if tx_hash:
+                    auto_submitted = True
+                    # Store on self so end_fractal's general channel embed can reference it
+                    self._auto_submit_tx_hash = tx_hash
+                    explorer_url = f"https://optimistic.etherscan.io/tx/{tx_hash}"
 
-            await self.thread.send(embed=embed)
+                    embed = discord.Embed(
+                        title="⛓️ Results Submitted Onchain!",
+                        description=(
+                            "**Breakout results have been automatically submitted.**\n\n"
+                            + "\n".join(rankings_lines)
+                        ),
+                        color=0x57F287,
+                        url=explorer_url,
+                    )
+                    embed.add_field(
+                        name="Transaction",
+                        value=f"[View on Optimism Explorer]({explorer_url})\n`{tx_hash}`",
+                        inline=False,
+                    )
+                    embed.set_footer(text="ZAO Fractal • Auto-submitted via bot wallet")
 
-            # Post a plain-text message with the raw URL and @mentions. This
-            # ensures every member gets a notification ping and the link is
-            # visible even for users whose clients do not render embeds.
-            mentions = " ".join([m.mention for m in self.members])
-            await self.thread.send(
-                f"🔗 **Go vote here to submit results onchain:**\n"
-                f"{submit_url}\n\n"
-                f"{mentions} — click the link above to confirm the breakout results!"
-            )
+                    await self.thread.send(embed=embed)
+
+                    mentions = " ".join([m.mention for m in self.members])
+                    await self.thread.send(
+                        f"⛓️ **Results submitted onchain!** Tx: {explorer_url}\n\n"
+                        f"{mentions}"
+                    )
+
+                    self.logger.info(
+                        f"Auto-submitted breakout for '{self.thread.name}' "
+                        f"group={group_number} tx={tx_hash}"
+                    )
+                else:
+                    # Auto-submit failed -- log and fall through to URL generation
+                    self.logger.warning(
+                        f"Auto-submit failed for '{self.thread.name}' group={group_number}, "
+                        f"falling back to manual URL"
+                    )
+
+            elif BOT_PRIVATE_KEY and missing:
+                # Private key is set but some wallets are missing -- can't auto-submit
+                self.logger.info(
+                    f"Skipping auto-submit for '{self.thread.name}': "
+                    f"missing wallets for {missing}"
+                )
+
+            # ── Fallback: post the manual submission URL ───────────────────
+            if not auto_submitted:
+                base_url = "https://zao.frapps.xyz/submitBreakout"
+                url_params = {'groupnumber': group_number}
+                for i, (member, wallet) in enumerate(ranked_wallets):
+                    url_params[f'vote{i+1}'] = wallet if wallet else ''
+                submit_url = f"{base_url}?{urlencode(url_params)}"
+
+                # If auto-submit was attempted but failed, add a warning
+                auto_fail_note = ""
+                if BOT_PRIVATE_KEY and tx_hash is None and not missing:
+                    auto_fail_note = (
+                        "\n\n⚠️ **Auto-submit failed.** Please submit manually using the link below."
+                    )
+
+                embed = discord.Embed(
+                    title="🗳️ Submit Results Onchain",
+                    description=(
+                        "**Fractal complete! Now submit these rankings onchain to earn Respect.**\n\n"
+                        + "\n".join(rankings_lines)
+                        + auto_fail_note
+                    ),
+                    color=0x57F287,
+                    url=submit_url,
+                )
+
+                if missing:
+                    embed.add_field(
+                        name="⚠️ Missing Wallets",
+                        value=f"{', '.join(missing)} — use `/register 0xYourAddress` to link",
+                        inline=False,
+                    )
+
+                embed.set_footer(text="ZAO Fractal • zao.frapps.xyz")
+
+                await self.thread.send(embed=embed)
+
+                mentions = " ".join([m.mention for m in self.members])
+                await self.thread.send(
+                    f"🔗 **Go vote here to submit results onchain:**\n"
+                    f"{submit_url}\n\n"
+                    f"{mentions} — click the link above to confirm the breakout results!"
+                )
 
         except Exception as e:
-            self.logger.error(f"Error generating submitBreakout link: {e}", exc_info=True)
+            self.logger.error(f"Error in submitBreakout flow: {e}", exc_info=True)

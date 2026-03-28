@@ -222,6 +222,13 @@ async def on_ready():
                     logger.info(f"[AUTO-LOCK] {member.display_name} ({member.id}) -> {wallet[:10]}...")
         logger.info(f"Auto-locked {locked_count} wallet(s) from name matching")
 
+        # Auto-link Farcaster identities: merge Discord<->Farcaster via shared wallets
+        try:
+            fc_linked = registry.auto_link_farcaster_identities()
+            logger.info(f"Auto-linked {fc_linked} Farcaster identity(ies) via wallet matching")
+        except Exception as e:
+            logger.error(f"Farcaster auto-link failed: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Error Alerting -- post critical errors to #fractal-bot for admin visibility

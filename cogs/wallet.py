@@ -198,6 +198,125 @@ class WalletRegistry:
         self.logger = logging.getLogger('bot')
         self.sb = get_supabase()
 
+    # ------------------------------------------------------------------
+    # Farcaster FID linking
+    # ------------------------------------------------------------------
+
+    def link_farcaster(self, discord_id: int, fid: int) -> dict | None:
+        """Link a Farcaster FID to a Discord user in the users table.
+
+        Looks up the user row by discord_id, updates the ``fid`` column.
+        Returns the updated row dict (with discord_id, fid, primary_wallet)
+        or ``None`` if no user row exists for this discord_id.
+        """
+        did = str(discord_id)
+        result = (
+            self.sb.table("users")
+            .select("id, discord_id, fid, primary_wallet")
+            .eq("discord_id", did)
+            .maybe_single()
+            .execute()
+        )
+        if not result.data:
+            return None
+
+        self.sb.table("users").update(
+            {"fid": fid}
+        ).eq("id", result.data["id"]).execute()
+
+        result.data["fid"] = fid
+        return result.data
+
+    def get_fid_by_discord_id(self, discord_id: int) -> int | None:
+        """Return the Farcaster FID for *discord_id*, or ``None``."""
+        result = (
+            self.sb.table("users")
+            .select("fid")
+            .eq("discord_id", str(discord_id))
+            .maybe_single()
+            .execute()
+        )
+        if result.data:
+            return result.data.get("fid")
+        return None
+
+    def auto_link_farcaster_identities(self) -> int:
+        """Auto-merge Discord and Farcaster identities via shared wallet address.
+
+        Finds users who have discord_id + primary_wallet but no fid, then
+        checks if another row exists with the same wallet that HAS a fid.
+        Merges by copying the fid to the Discord-linked row.
+
+        Also handles the reverse: rows with fid + wallet but no discord_id
+        that match a row with discord_id + wallet.
+
+        Returns the number of identities linked.
+        """
+        linked = 0
+
+        # Case 1: Discord users missing a FID — find matching wallet rows that have one
+        discord_rows = (
+            self.sb.table("users")
+            .select("id, discord_id, primary_wallet, fid")
+            .not_.is_("discord_id", "null")
+            .not_.is_("primary_wallet", "null")
+            .is_("fid", "null")
+            .execute()
+        )
+        for row in discord_rows.data or []:
+            wallet = row["primary_wallet"]
+            # Look for another row with same wallet that has a fid
+            match = (
+                self.sb.table("users")
+                .select("id, fid")
+                .eq("primary_wallet", wallet)
+                .not_.is_("fid", "null")
+                .neq("id", row["id"])
+                .maybe_single()
+                .execute()
+            )
+            if match.data and match.data.get("fid"):
+                # Copy fid to the Discord-linked row
+                self.sb.table("users").update(
+                    {"fid": match.data["fid"]}
+                ).eq("id", row["id"]).execute()
+                linked += 1
+                self.logger.info(
+                    f"[AUTO-LINK-FC] discord_id={row['discord_id']} -> fid={match.data['fid']} via wallet {wallet[:10]}..."
+                )
+
+        # Case 2: Farcaster users missing a discord_id — find matching wallet rows that have one
+        fc_rows = (
+            self.sb.table("users")
+            .select("id, fid, primary_wallet, discord_id")
+            .not_.is_("fid", "null")
+            .not_.is_("primary_wallet", "null")
+            .is_("discord_id", "null")
+            .execute()
+        )
+        for row in fc_rows.data or []:
+            wallet = row["primary_wallet"]
+            match = (
+                self.sb.table("users")
+                .select("id, discord_id")
+                .eq("primary_wallet", wallet)
+                .not_.is_("discord_id", "null")
+                .neq("id", row["id"])
+                .maybe_single()
+                .execute()
+            )
+            if match.data and match.data.get("discord_id"):
+                # Copy discord_id to the Farcaster-linked row
+                self.sb.table("users").update(
+                    {"discord_id": match.data["discord_id"]}
+                ).eq("id", row["id"]).execute()
+                linked += 1
+                self.logger.info(
+                    f"[AUTO-LINK-FC] fid={row['fid']} -> discord_id={match.data['discord_id']} via wallet {wallet[:10]}..."
+                )
+
+        return linked
+
     def register(self, discord_id: int, wallet: str) -> None:
         """Create or update a permanent Discord-ID -> wallet link.
 
@@ -742,6 +861,100 @@ class WalletCog(BaseCog):
             msg = msg[:1950] + "\n... (truncated)"
 
         await interaction.followup.send(msg, ephemeral=True)
+
+
+    # ------------------------------------------------------------------
+    # Farcaster linking commands
+    # ------------------------------------------------------------------
+
+    @app_commands.command(
+        name="link_farcaster",
+        description="Link your Farcaster account to your Discord identity"
+    )
+    @app_commands.describe(fid="Your Farcaster FID (numeric ID)")
+    async def link_farcaster(self, interaction: discord.Interaction, fid: int):
+        """Link the calling user's Discord account to a Farcaster FID.
+
+        Updates the ``fid`` column on the user's row in the ``users`` table.
+        The user must have already registered a wallet via ``/register``.
+        """
+        await interaction.response.defer(ephemeral=True)
+
+        if fid <= 0:
+            await interaction.followup.send(
+                "Invalid FID. Please provide a positive integer Farcaster ID.",
+                ephemeral=True
+            )
+            return
+
+        result = self.registry.link_farcaster(interaction.user.id, fid)
+        if not result:
+            await interaction.followup.send(
+                "No account found for your Discord ID. "
+                "Please use `/register` to link your wallet first, then try again.",
+                ephemeral=True
+            )
+            return
+
+        wallet = result.get("primary_wallet")
+        wallet_display = f"`{wallet[:6]}...{wallet[-4:]}`" if wallet else "_not set_"
+
+        embed = discord.Embed(
+            title="Farcaster Linked",
+            color=discord.Color.purple(),
+        )
+        embed.add_field(name="Discord", value=interaction.user.display_name, inline=True)
+        embed.add_field(name="Farcaster FID", value=str(fid), inline=True)
+        embed.add_field(name="Wallet", value=wallet_display, inline=True)
+        embed.set_footer(text="Your Discord and Farcaster identities are now connected in ZAO OS")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(
+        name="admin_link_farcaster",
+        description="[ADMIN] Link a Farcaster FID to another user's Discord account"
+    )
+    @app_commands.describe(
+        user="Discord user to link",
+        fid="Their Farcaster FID (numeric ID)"
+    )
+    async def admin_link_farcaster(self, interaction: discord.Interaction, user: discord.Member, fid: int):
+        """Admin-only: link a Farcaster FID to another member's Discord account."""
+        await interaction.response.defer(ephemeral=True)
+
+        if not self.is_supreme_admin(interaction.user):
+            await interaction.followup.send(
+                "You need the **Supreme Admin** role to use this command.",
+                ephemeral=True
+            )
+            return
+
+        if fid <= 0:
+            await interaction.followup.send("Invalid FID. Must be a positive integer.", ephemeral=True)
+            return
+
+        result = self.registry.link_farcaster(user.id, fid)
+        if not result:
+            await interaction.followup.send(
+                f"No account found for {user.mention}. "
+                f"They need to `/register` a wallet first.",
+                ephemeral=True
+            )
+            return
+
+        wallet = result.get("primary_wallet")
+        wallet_display = f"`{wallet[:6]}...{wallet[-4:]}`" if wallet else "_not set_"
+
+        embed = discord.Embed(
+            title="Farcaster Linked (Admin)",
+            color=discord.Color.purple(),
+        )
+        embed.add_field(name="Discord", value=user.display_name, inline=True)
+        embed.add_field(name="Farcaster FID", value=str(fid), inline=True)
+        embed.add_field(name="Wallet", value=wallet_display, inline=True)
+        embed.set_footer(text=f"Linked by {interaction.user.display_name}")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot):

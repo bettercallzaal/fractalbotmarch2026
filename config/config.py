@@ -13,6 +13,8 @@ Convention:
       this module is purely declarative.
 """
 
+import os
+
 # ---------------------------------------------------------------------------
 # Bot Version
 # ---------------------------------------------------------------------------
@@ -79,3 +81,26 @@ PROPOSALS_CHANNEL_ID = 1473782633384116397
 # Channel the bot listens to for fractal-related commands (/zaofractal, etc.).
 # Commands issued outside this channel are rejected with a friendly redirect.
 FRACTAL_BOT_CHANNEL_ID = 1389323864751870122
+
+# ---------------------------------------------------------------------------
+# Onchain Auto-Submit (Hot Wallet)
+# ---------------------------------------------------------------------------
+# Private key for the bot's dedicated signing wallet.  If set, the bot will
+# auto-sign and broadcast ``submitBreakout`` transactions after a fractal
+# completes.  If not set, the bot falls back to generating a manual URL.
+# SECURITY: Use a dedicated low-value EOA.  Never use a personal wallet.
+BOT_PRIVATE_KEY = os.getenv('BOT_PRIVATE_KEY')
+
+# The ORDAO / Respect contract on Optimism that exposes ``submitBreakout``.
+# This is the ZAO Respect1155 contract deployed via the ORDAO framework.
+ORDAO_CONTRACT_ADDRESS = os.getenv(
+    'ORDAO_CONTRACT_ADDRESS',
+    '0x9885CCeEf7E8371Bf8d6f2413723D25917E7445c'
+)
+
+# Optimism JSON-RPC endpoint used for sending transactions.  Falls back to
+# the existing ALCHEMY_OPTIMISM_RPC env var, then to the public endpoint.
+OPTIMISM_RPC_URL = os.getenv(
+    'OPTIMISM_RPC_URL',
+    os.getenv('ALCHEMY_OPTIMISM_RPC', 'https://mainnet.optimism.io')
+)
