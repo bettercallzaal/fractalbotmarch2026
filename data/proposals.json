@@ -1,5 +1,5 @@
 {
-  "next_id": 21,
+  "next_id": 24,
   "proposals": {
     "1": {
       "id": "1",
@@ -491,6 +491,54 @@
       "project_url": "https://artizen.fund/index/p/memethology",
       "created_at": "2026-03-11T18:38:58.551421",
       "closed_at": "2026-03-23T21:32:36.229645+00:00"
+    },
+    "21": {
+      "id": "21",
+      "title": "Curate: Threads Of Hope",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Threads Of Hope\n**Link:** [View Project](https://artizen.fund/index/p/threads-of-hope?season=6)\n\nThis project is creator-owned and independently operated, stewarded in close collaboration with the women who participate in and shape the collective. It exists as a community-driven initiative where Palestinian women in Cairo gather to create, connect, and carry forward cultural knowledge through Tatreez.  The work integrates emerging technology through digital documentation, online distribution, and artifact-based participation. Handmade pieces are shared and supported through digital platforms, including the creation of public-facing artifacts that bridge physical craft with global audiences. This creates a hybrid model where traditional practice meets digital access and visibility.  Collaboration is central to the project. The work is created collectively, with participants contributing to both the artistic output and the structure of the space itself. The process is shared openly through ongoing documentation, allowing others to witness, engage with, and support the work as it evolves.  The project operates within a non-extractive framework. Participation is free and open, with resources directed toward materials, space, and collective support rather than individual profit. When revenue is generated through the sale of handmade work, it directly benefits the women who create it.  The work culminates in real-world activation through ongoing, in-person workshops and gatherings where women come together regularly. These sessions function as both creative production and community experience, with tangible outputs in the form of handmade pieces and a growing collective presence.  With over 200 women participating over the past 1.5 years, the project demonstrates strong momentum and continued engagement.  Learn more: https://www.instagram.com/threadofhope88/  https://educational-excellence.org/2025/04/17/palestinian-art-tatreez-paintings-and-hope-in-cairo-egypt/\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1486317555642536017",
+      "message_id": "1486317557333098549",
+      "status": "active",
+      "votes": {},
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/threads-of-hope?season=6",
+      "created_at": "2026-03-25T10:55:20.149974+00:00"
+    },
+    "22": {
+      "id": "22",
+      "title": "Curate: Dark Rooms  Immersive Experience",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Dark Rooms  Immersive Experience\n**Link:** [View Project](https://artizen.fund/index/p/dark-rooms--immersive-experience?season=6)\n\nDark Rooms is a creator-owned immersive storytelling project developed by an independent collective of artists, technologists, and producers working across Copenhagen, Berlin, and Taipei. The project merges moving image, spatial storytelling, and immersive technology to create a multi-user VR installation exploring intimacy, vulnerability, and healing.  Emerging technology is used intentionally and in service of emotional depth. Multi-user VR, real-time gesture tracking, and AI-assisted interaction allow participants to move, respond, and shape narrative space together. The technology enables embodied presence rather than passive viewing.  Collaboration is fundamental to the project. Stories are developed through workshops and co-creation processes with contributors whose lived experiences shape the narrative environments. The project follows the principle \u201cnothing about us without us,\u201d ensuring participants influence the creative structure rather than serving as extracted source material.  The production framework prioritizes fair collaboration and transparent practices. Contributors are compensated for their work and credited appropriately, reflecting a commitment to non-extractive cultural production.  Dark Rooms is also built publicly through iterative development. Workshops, prototypes, and touring installations generate documentation and shared learning that are openly communicated with the wider creative community.  The project culminates in a real-world activation: a touring location-based installation presented at festivals, cultural institutions, and partner venues internationally. Audiences enter a shared immersive environment where narrative unfolds through movement and interaction, transforming spectators into participants.  By combining immersive technology, collective authorship, and public exhibition, Dark Rooms aligns closely with ZAO\u2019s vision of collaborative, creator-owned cultural production.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1486317703491747840",
+      "message_id": "1486317704813215845",
+      "status": "active",
+      "votes": {},
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/dark-rooms--immersive-experience?season=6",
+      "created_at": "2026-03-25T10:55:55.310048+00:00"
+    },
+    "23": {
+      "id": "23",
+      "title": "Curate: Little Ugly",
+      "description": "**Should the ZAO fund this project?**\n\n**Project:** Little Ugly\n**Link:** [View Project](https://artizen.fund/index/p/little-ugly)\n\n\u5c0f\u4e11 / Little Ugly is an independently produced, creator-owned VR film that merges immersive technology with cultural storytelling, culminating in public festival premieres and community screening activations. Creator-owned and independently operated. The project is co-owned by its two writer-directors, Tiger George and Lily Chiu, operating outside studio structures with full creative and financial autonomy. Emerging technology, meaningfully integrated. 180\u00b0 VR captured via a custom-built binocular rig is not decorative \u2014 it is the film's core expressive tool, transforming architectural space into psychological geography and placing audiences inside the protagonist's dissociated gaze. Collaboration and community participation. The project is built on meaningful creative collaboration: a majority-women team spanning cinematography, sound design, costume, and production, alongside a fashion partnership with APOC Store. Facilitated community screenings in therapeutic and educational settings are built into the distribution plan, inviting active audience participation rather than passive consumption. Building in public. The team's backgrounds at NOWNESS and The Institute of Digital Fashion reflect a practice of open creative documentation and public-facing cultural production. Process sharing across the production will be integral to the project's outreach strategy. Non-extractive, fair-compensation framework. All collaborators \u2014 including the child performer, costume designers, and crew \u2014 are compensated fairly with full safeguarding and ethical protocols in place. Public-facing activation. The project culminates in festival premieres at Venice Immersive, Tribeca, and SXSW, followed by facilitated public screenings \u2014 real-world, community-facing gatherings where the work lives beyond the headset.\n\nVote **Yes** to include or **No** to pass.",
+      "type": "curate",
+      "author_id": "214921134477541377",
+      "thread_id": "1486318038083960892",
+      "message_id": "1486318039728259202",
+      "status": "active",
+      "votes": {},
+      "options": [],
+      "funding_amount": null,
+      "image_url": null,
+      "project_url": "https://artizen.fund/index/p/little-ugly",
+      "created_at": "2026-03-25T10:57:15.160369+00:00"
     }
   },
   "_index_message_id": "1475629008933880055"
